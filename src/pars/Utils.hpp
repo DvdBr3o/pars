@@ -5,6 +5,7 @@
 #include <utf8cpp/utf8.h>
 
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -153,5 +154,44 @@ namespace pars {
 
 	template<typename... Ts>
 	using unique_variant_t = unique_variant<Ts...>::type;
+
+	template<typename T>
+	struct tuple_like : std::false_type {};
+
+	template<typename... Ts>
+	struct tuple_like<std::tuple<Ts...>> : public std::true_type {};
+
+	template<typename... Ts>
+	struct tuple_like<std::tuple<Ts...>&> : public std::true_type {};
+
+	template<typename... Ts>
+	struct tuple_like<const std::tuple<Ts...>&> : public std::true_type {};
+
+	template<typename... Ts>
+	struct tuple_like<std::tuple<Ts...>&&> : public std::true_type {};
+
+	template<typename T>
+	inline static constexpr auto tuple_like_v = tuple_like<T>::value;
+
+	template<typename T>
+	concept tuple_like_c = tuple_like_v<T>;
+
+	template<typename F, typename T>
+	struct tuple_apply_result {
+		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
+	};
+
+	template<typename F, typename T>
+	using tuple_apply_result_t = tuple_apply_result<F, T>::type;
+
+	template<typename F, typename T>
+	struct auto_tuple_apply_result {
+		using type = std::invoke_result_t<F, T&&>;
+	};
+
+	template<typename F, tuple_like_c T>
+	struct auto_tuple_apply_result<F, T> {
+		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
+	};
 
 }  // namespace pars

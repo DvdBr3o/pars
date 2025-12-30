@@ -12,6 +12,7 @@
 #include <concepts>
 #include <format>
 #include <map>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -19,25 +20,24 @@ namespace pars {
 	template<typename T>
 	concept ParserStateC = requires(T t) {
 		{ t.bump() } -> std::convertible_to<char32_t>;
+		typename T::restore_type;
+		{ t.store() } -> std::convertible_to<typename T::restore_type>;
+		{ t.load(std::declval<typename T::restore_type>()) };
 	};
 
 	template<typename T, typename PS>
 	concept ParserRuleC = requires(T t, PS& ps) { t.match(ps); };
 
 	struct ParserState : public u8::Cursor {
-		// std::map<size_t, size_t> pracket;
-
 		using u8::Cursor::bump;
 
-		struct Restore {
+		using restore_type = struct Restore {
 			u8::Cursor cursor;
-			// std::size_t pracket_size;
 		};
 
 		[[nodiscard]] auto store() const -> Restore {
 			return {
 				*this,
-				// pracket.size(),
 			};
 		}
 
@@ -411,6 +411,55 @@ namespace pars {
 			}
 		};
 
+		template<ParserRuleC<ParserStateT> R, typename F>
+		struct ValueTransformRule : R, F {
+			using Value = auto_tuple_apply_result<F, RuleValue<R>>;
+			using Error = RuleError<R>;
+
+			constexpr ValueTransformRule(F&& f, auto&&... args) :
+				F(std::forward<F>(f)), R { std::forward<decltype(args)>(args)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				auto m = this->R::match(ps);
+				if (m)
+					if constexpr (tuple_like_v<std::remove_cvref_t<decltype(*m)>>)
+						return std::apply(
+							[&](auto&&... args) {
+								return std::invoke(
+									static_cast<const F&>(*this),
+									std::forward<decltype(args)>(args)...
+								);
+							},
+							std::move(*m)
+						);
+					else
+						return std::invoke(static_cast<const F&>(*this), std::move(*m));
+				else
+					return tl::make_unexpected(m.error());
+			}
+		};
+
+		template<typename F>
+		struct ValueTransformFunctor : public F {};
+
+		template<typename F>
+		using value_to = ValueTransformFunctor<F>;
+
+		template<ParserRuleC<ParserStateT> R, std::invocable<RuleResult<R>&&> F>
+		struct ResultTransformRule {
+			using Result = std::invoke_result_t<F, RuleResult<R>&&>;
+			using Value	 = value_type_of_t<Result>;
+			using Error	 = error_type_of_t<Result>;
+
+			auto match(ParserStateT& ps) const -> Result { return (*this)(this->R::match(ps)); };
+		};
+
+		template<typename F>
+		struct ResultTransformFunctor : public F {};
+
+		template<typename F>
+		using result_to = ResultTransformFunctor<F>;
+
 		template<typename F>
 		struct FixRule : F {
 			constexpr FixRule(F&& f) : F(std::move(f)) {}
@@ -465,6 +514,26 @@ namespace pars {
 		[[nodiscard]] inline friend constexpr auto operator!(R&& r) noexcept {
 			return PeekNotRule<R> { std::forward<R>(r) };
 		}
+
+		template<ParserRuleC<ParserStateT> R, typename F>
+		[[nodiscard]] inline friend constexpr auto operator%(
+			R&& r, ValueTransformFunctor<F>&& f
+		) noexcept {
+			return ValueTransformRule<std::remove_cvref_t<R>, std::remove_cvref_t<F>> {
+				std::forward<F>(f),
+				std::forward<R>(r)
+			};
+		}
+
+		template<ParserRuleC<ParserStateT> R, typename F>
+		[[nodiscard]] inline friend constexpr auto operator%(
+			R&& r, ResultTransformFunctor<F>&& f
+		) noexcept {
+			return ResultTransformRule<std::remove_cvref_t<R>, std::remove_cvref_t<F>> {
+				std::forward<F>(f),
+				std::forward<R>(r)
+			};
+		}
 	};
 
 	using CharRule					  = ParserKit<>::CharRule;
@@ -485,6 +554,16 @@ namespace pars {
 	using OnceOrMoreRule = ParserKit<>::OnceOrMoreRule<Ts...>;
 	template<typename... Ts>
 	using RepeatableRule = ParserKit<>::RepeatableRule<Ts...>;
+	template<typename... Ts>
+	using ValueTransformRule = ParserKit<>::ValueTransformRule<Ts...>;
+	template<typename... Ts>
+	using ValueTransformFunctor = ParserKit<>::ValueTransformFunctor<Ts...>;
+	template<typename... Ts>
+	using value_to = ParserKit<>::ValueTransformFunctor<Ts...>;
+	template<typename... Ts>
+	using ResultTransformFunctor = ParserKit<>::ResultTransformFunctor<Ts...>;
+	template<typename... Ts>
+	using result_to = ParserKit<>::ResultTransformFunctor<Ts...>;
 	template<typename... Ts>
 	using FixRule = ParserKit<>::FixRule<Ts...>;
 	template<typename... Ts>

@@ -50,11 +50,12 @@ namespace pars::test::arithmetic {
 	static constexpr auto oom		  = +c('+');
 	static constexpr auto rpt		  = *c('+');
 	static constexpr auto pis		  = ~c('+');
+	static constexpr auto vt		  = ~c('+') % value_to([](auto c) {});
+	static constexpr auto seqrt		  = seq % value_to([](auto c1, auto c2) {});
 
 	TEST_CASE("parser can handle precedence.", "[arithmetic.precedence]") {
 		static constexpr auto script = u8R"(+9)";
 
-		// +c('a');
 		//
 		ParserState st1 = { { u8R"(++++)" } };
 		ParserState st2 = { { u8R"(a-)" } };
