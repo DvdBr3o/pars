@@ -3,6 +3,7 @@
 #include <range/v3/range.hpp>
 #include <tl/expected.hpp>
 #include <utf8cpp/utf8.h>
+#include <fmt/format.h>
 
 #include <string_view>
 #include <type_traits>
@@ -42,7 +43,11 @@ namespace pars {
 				} catch (const utf8::not_enough_room&) { return eof; }
 			}
 
-			auto peek() { return utf8::peek_next(_cursor, const_cast<char*>(end())); }
+			[[nodiscard]] auto peek() const -> char32_t {
+				try {
+					return utf8::peek_next(_cursor, const_cast<char*>(end()));
+				} catch (const utf8::not_enough_room&) { return eof; }
+			}
 
 			auto prior() { return utf8::prior(_cursor, const_cast<char*>(begin())); }
 
@@ -193,6 +198,9 @@ namespace pars {
 	struct auto_tuple_apply_result<F, T> {
 		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
 	};
+
+	template<typename F, typename T>
+	using auto_tuple_apply_result_t = auto_tuple_apply_result<F, T>::type;
 
 	template<typename F, typename T>
 	struct tuple_applyable : public std::false_type {};

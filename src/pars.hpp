@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <concepts>
 #include <format>
-#include <map>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -399,13 +398,16 @@ namespace pars {
 
 		template<ParserRuleC<ParserStateT> R>
 		struct PeekNotRule : R {
-			using Value = std::monostate;
+			struct RuleMatchedError {};
 
-			using Error = struct RuleMatchedError {};
+			using Value = std::monostate;
+			using Error = std::variant<RuleMatchedError, EarlyEofError>;
 
 			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
-				if (PeekIsRule { *this }.match(ps))
+				if (PeekIsRule<R> { *this }.match(ps))
 					return tl::make_unexpected(RuleMatchedError {});
+				else if (!ps.peek())
+					return tl::make_unexpected(EarlyEofError {});
 				else
 					return std::monostate {};
 			}
@@ -413,7 +415,7 @@ namespace pars {
 
 		template<ParserRuleC<ParserStateT> R, typename F>
 		struct ValueTransformRule : R, F {
-			using Value = auto_tuple_apply_result<F, RuleValue<R>>;
+			using Value = auto_tuple_apply_result_t<F, RuleValue<R>>;
 			using Error = RuleError<R>;
 
 			constexpr ValueTransformRule(F&& f, auto&&... args) :
@@ -497,7 +499,7 @@ namespace pars {
 
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator+(R&& r) noexcept {
-			return OnceOrMoreRule<R> { std::forward<R>(r) };
+			return OnceOrMoreRule<std::remove_cvref_t<R>> { std::forward<R>(r) };
 		}
 
 		template<ParserRuleC<ParserStateT> R>
@@ -533,8 +535,7 @@ namespace pars {
 			};
 		}
 
-		template<ParserRuleC<ParserStateT> R, typename F>
-			requires(!std::invocable<RuleValue<R> &&> && tuple_applyable_c<F, RuleValue<R>>)
+		template<ParserRuleC<ParserStateT> R, tuple_applyable_c<RuleValue<R>> F>
 		[[nodiscard]] inline friend constexpr auto operator%(R&& r, F&& f) noexcept {
 			return ValueTransformRule<std::remove_cvref_t<R>, std::remove_cvref_t<F>> {
 				std::forward<F>(f),

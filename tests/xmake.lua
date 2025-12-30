@@ -15,3 +15,4 @@ end
 
 pars_test("basic")
 pars_test("arithmetic")
+pars_test("markdown")
