@@ -194,4 +194,19 @@ namespace pars {
 		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
 	};
 
+	template<typename F, typename T>
+	struct tuple_applyable : public std::false_type {};
+
+	template<typename F, tuple_like_c T>
+		requires requires(F f, T t) { std::apply(f, t); }
+	struct tuple_applyable<F, T> : public std::true_type {};
+
+	static_assert(tuple_applyable<decltype([](int, double) {}), std::tuple<int, double>>::value);
+
+	template<typename F, typename T>
+	inline static constexpr auto tuple_applyable_v = tuple_applyable<F, T>::value;
+
+	template<typename F, typename T>
+	concept tuple_applyable_c = tuple_applyable_v<F, T>;
+
 }  // namespace pars

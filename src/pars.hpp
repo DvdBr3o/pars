@@ -525,6 +525,23 @@ namespace pars {
 			};
 		}
 
+		template<ParserRuleC<ParserStateT> R, std::invocable<RuleValue<R>&&> F>
+		[[nodiscard]] inline friend constexpr auto operator%(R&& r, F&& f) noexcept {
+			return ValueTransformRule<std::remove_cvref_t<R>, std::remove_cvref_t<F>> {
+				std::forward<F>(f),
+				std::forward<R>(r)
+			};
+		}
+
+		template<ParserRuleC<ParserStateT> R, typename F>
+			requires(!std::invocable<RuleValue<R> &&> && tuple_applyable_c<F, RuleValue<R>>)
+		[[nodiscard]] inline friend constexpr auto operator%(R&& r, F&& f) noexcept {
+			return ValueTransformRule<std::remove_cvref_t<R>, std::remove_cvref_t<F>> {
+				std::forward<F>(f),
+				std::forward<R>(r)
+			};
+		}
+
 		template<ParserRuleC<ParserStateT> R, typename F>
 		[[nodiscard]] inline friend constexpr auto operator%(
 			R&& r, ResultTransformFunctor<F>&& f
