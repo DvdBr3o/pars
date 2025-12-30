@@ -380,9 +380,21 @@ namespace pars {
 		RepeatableRule(R&&) -> RepeatableRule<R>;
 
 		template<ParserRuleC<ParserStateT> R>
-		struct PeekIsRule {
+		struct PeekIsRule : R {
 			using Value = std::monostate;
 			using Error = RuleError<R>;
+
+			constexpr PeekIsRule(auto&&... args) : R { std::forward<decltype(args)>(args)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				tl::expected<Value, Error> res	   = std::monostate {};
+				const auto				   restore = ps.store();
+				auto					   m	   = this->R::match(ps);
+				if (!m)
+					res = tl::make_unexpected(m.error());
+				ps.load(restore);
+				return res;
+			}
 		};
 
 		template<ParserRuleC<ParserStateT> R>
