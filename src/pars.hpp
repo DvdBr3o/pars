@@ -398,9 +398,17 @@ namespace pars {
 		};
 
 		template<ParserRuleC<ParserStateT> R>
-		struct PeekNotRule {
+		struct PeekNotRule : R {
 			using Value = std::monostate;
-			using Error = RuleError<R>;
+
+			using Error = struct RuleMatchedError {};
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				if (PeekIsRule { *this }.match(ps))
+					return tl::make_unexpected(RuleMatchedError {});
+				else
+					return std::monostate {};
+			}
 		};
 
 		template<typename F>
@@ -455,7 +463,7 @@ namespace pars {
 
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator!(R&& r) noexcept {
-			return PeekNotRule<R> {};
+			return PeekNotRule<R> { std::forward<R>(r) };
 		}
 	};
 
