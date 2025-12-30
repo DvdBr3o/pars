@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fmt/base.h"
 #include "pars/Utils.hpp"
 
 #include <tl/expected.hpp>
@@ -11,6 +12,7 @@
 #include <concepts>
 #include <format>
 #include <map>
+#include <utility>
 #include <variant>
 
 namespace pars {
@@ -23,7 +25,23 @@ namespace pars {
 	concept ParserRuleC = requires(T t, PS& ps) { t.match(ps); };
 
 	struct ParserState : public u8::Cursor {
-		std::map<size_t, size_t> pracket;
+		// std::map<size_t, size_t> pracket;
+
+		using u8::Cursor::bump;
+
+		struct Restore {
+			u8::Cursor cursor;
+			// std::size_t pracket_size;
+		};
+
+		[[nodiscard]] auto store() const -> Restore {
+			return {
+				*this,
+				// pracket.size(),
+			};
+		}
+
+		void load(const Restore& rs) { static_cast<Cursor&>(*this) = rs.cursor; }
 	};
 
 	template<ParserStateC ParserStateT = ParserState>
@@ -32,9 +50,9 @@ namespace pars {
 		using RuleResult =
 			std::remove_cvref_t<decltype(std::declval<R>().match(std::declval<ParserStateT&>()))>;
 		template<ParserRuleC<ParserStateT> R>
-		using RuleValue = value_type_of<RuleResult<R>>;
+		using RuleValue = value_type_of_t<RuleResult<R>>;
 		template<ParserRuleC<ParserStateT> R>
-		using RuleError = error_type_of<RuleResult<R>>;
+		using RuleError = error_type_of_t<RuleResult<R>>;
 
 		struct EarlyEofError {
 			inline constexpr auto to_string() const { return "Early EOF."; }
@@ -54,7 +72,11 @@ namespace pars {
 				char32_t			  received;
 
 				inline constexpr auto to_string() const {
-					return std::format("expect `{}`, received `{}`.", expect, received);
+					return std::format(
+						"expect `{}`, received `{}`.",
+						to_utf8(expect),
+						to_utf8(received)
+					);
 				}
 			};
 
@@ -184,7 +206,7 @@ namespace pars {
 		template<ParserRuleC<ParserStateT>... Rs>
 		struct SequentialRule : std::tuple<Rs...> {
 			using Value = std::tuple<RuleValue<Rs>...>;
-			using Error = std::variant<RuleError<Rs>...>;
+			using Error = unique_variant_t<RuleError<Rs>...>;
 
 			template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT>... Rs2>
 			constexpr SequentialRule(SequentialRule<Rs1...>&& s1, SequentialRule<Rs2...>&& s2) :
@@ -210,7 +232,22 @@ namespace pars {
 			constexpr SequentialRule(ParserRuleC<ParserStateT> auto&&... rs) :
 				std::tuple<Rs...> { std::forward<decltype(rs)>(rs)... } {}
 
-			auto match(ParserStateT& ps) -> tl::expected<Value, Error> {}
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				return [&]<size_t... Is>(std::index_sequence<Is...>) {
+					tl::expected<Value, Error> res = Value {};
+					(... && [&]() {
+						auto r = std::get<Is>(*this).match(ps);
+						if (r) {
+							std::get<Is>(*res) = std::move(*r);
+							return true;
+						} else {
+							res = tl::make_unexpected<Error>(std::move(r.error()));
+							return false;
+						}
+					}());
+					return res;
+				}(std::make_index_sequence<sizeof...(Rs)>());
+			}
 		};
 
 		template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT>... Rs2>
@@ -224,27 +261,119 @@ namespace pars {
 		SequentialRule(R1&&, R2&&) -> SequentialRule<R1, R2>;
 
 		template<ParserRuleC<ParserStateT>... Rs>
-		struct ChoiceRule {
-			using Value = std::variant<RuleValue<Rs>...>;
+		struct ChoiceRule : std::tuple<Rs...> {
+			using Value = unique_variant_t<RuleValue<Rs>...>;
 			using Error = std::tuple<RuleError<Rs>...>;
+
+			template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT>... Rs2>
+			constexpr ChoiceRule(ChoiceRule<Rs1...>&& s1, ChoiceRule<Rs2...>&& s2) :
+				std::tuple<Rs...> { std::tuple_cat(
+					static_cast<std::tuple<Rs1...>&&>(std::move(s1)),
+					static_cast<std::tuple<Rs2...>&&>(std::move(s2))
+				) } {}
+
+			template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT> R2>
+			constexpr ChoiceRule(ChoiceRule<Rs1...>&& s1, R2&& r2) :
+				std::tuple<Rs...> { std::tuple_cat(
+					static_cast<std::tuple<Rs1...>&&>(std::move(s1)),
+					std::make_tuple(std::forward<R2>(r2))
+				) } {}
+
+			template<ParserRuleC<ParserStateT> R1, ParserRuleC<ParserStateT>... Rs2>
+			constexpr ChoiceRule(R1&& r1, ChoiceRule<Rs2...>&& s2) :
+				std::tuple<Rs...> { std::tuple_cat(
+					std::make_tuple(std::forward<R1>(r1)),
+					static_cast<std::tuple<Rs2...>&&>(std::move(s2))
+				) } {}
+
+			constexpr ChoiceRule(ParserRuleC<ParserStateT> auto&&... rs) :
+				std::tuple<Rs...> { std::forward<decltype(rs)>(rs)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				return [&]<size_t... Is>(std::index_sequence<Is...>) -> tl::expected<Value, Error> {
+					tl::expected<Value, Error> res = tl::make_unexpected(Error {});
+					Error					   err;
+					const auto				   store = ps.store();
+					if ((... || [&]() {
+							auto r = std::get<Is>(*this).match(ps);
+							if (r) {
+								res = std::move(*r);
+								return true;
+							} else {
+								std::get<Is>(err) = std::move(r.error());
+								ps.load(store);
+								return false;
+							}
+						}()))
+						return res;
+					else
+						return tl::make_unexpected(std::move(err));
+				}(std::make_index_sequence<sizeof...(Rs)>());
+			}
 		};
 
+		template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT>... Rs2>
+		ChoiceRule(ChoiceRule<Rs1...>&&, ChoiceRule<Rs2...>&&) -> ChoiceRule<Rs1..., Rs2...>;
+		template<ParserRuleC<ParserStateT>... Rs1, ParserRuleC<ParserStateT> R2>
+		ChoiceRule(ChoiceRule<Rs1...>&&, R2&&) -> ChoiceRule<Rs1..., R2>;
+		template<ParserRuleC<ParserStateT> R1, ParserRuleC<ParserStateT>... Rs2>
+		ChoiceRule(R1&&, ChoiceRule<Rs2...>&&) -> ChoiceRule<R1, Rs2...>;
+		template<ParserRuleC<ParserStateT> R1, ParserRuleC<ParserStateT> R2>
+		ChoiceRule(R1&&, R2&&) -> ChoiceRule<R1, R2>;
+
 		template<ParserRuleC<ParserStateT> R>
-		struct OptionalRule {
-			using Value = std::optional<R>;
+		struct OptionalRule : R {
+			using Value = std::optional<RuleValue<R>>;
 			using Error = NeverFailError;
+
+			constexpr OptionalRule(auto&&... args) : R { std::forward<decltype(args)>(args)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				if (auto m = this->R::match(ps))
+					return Value { std::move(*m) };
+				else
+					return std::nullopt;
+			}
 		};
 
 		template<ParserRuleC<ParserStateT> R>
-		struct OnceOrMoreRule {
-			using Value = std::optional<R>;
+		struct OnceOrMoreRule : R {
+			using Value = std::vector<RuleValue<R>>;
 			using Error = RuleError<R>;
+
+			constexpr OnceOrMoreRule(auto&&... args) :
+				R { std::forward<decltype(args)>(args)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				Value	   val;
+				const auto restore	   = ps.store();
+				auto	   first_match = this->R::match(ps);
+				if (first_match) {
+					val.emplace_back(std::move(*first_match));
+					while (auto m = this->R::match(ps)) val.emplace_back(std::move(*m));
+					return std::move(val);
+				} else {
+					ps.load(restore);
+					return tl::make_unexpected(first_match.error());
+				}
+			}
 		};
 
 		template<ParserRuleC<ParserStateT> R>
-		struct RepeatableRule {
+		struct RepeatableRule : R {
 			using Value = std::vector<RuleValue<R>>;
 			using Error = NeverFailError;
+
+			constexpr RepeatableRule(auto&&... args) :
+				R { std::forward<decltype(args)>(args)... } {}
+
+			auto match(ParserStateT& ps) const -> tl::expected<Value, Error> {
+				tl::expected<Value, Error> res = Value {};
+
+				while (auto m = this->R::match(ps)) res->emplace_back(std::move(*m));
+
+				return res;
+			}
 		};
 
 		template<typename R>
@@ -283,24 +412,33 @@ namespace pars {
 			};
 		}
 
+		inline friend constexpr auto operator|(
+			ParserRuleC<ParserStateT> auto&& l, ParserRuleC<ParserStateT> auto&& r
+		) {
+			return ChoiceRule {
+				std::forward<decltype(l)>(l),
+				std::forward<decltype(r)>(r),
+			};
+		}
+
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator-(R&& r) noexcept {
-			return OptionalRule<R> {};
+			return OptionalRule<R> { std::forward<R>(r) };
 		}
 
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator+(R&& r) noexcept {
-			return OnceOrMoreRule<R> {};
+			return OnceOrMoreRule<R> { std::forward<R>(r) };
 		}
 
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator*(R&& r) noexcept {
-			return RepeatableRule<R> {};
+			return RepeatableRule<R> { std::forward<R>(r) };
 		}
 
 		template<ParserRuleC<ParserStateT> R>
 		[[nodiscard]] inline friend constexpr auto operator~(R&& r) noexcept {
-			return PeekIsRule<R> {};
+			return PeekIsRule<R> { std::forward<R>(r) };
 		}
 
 		template<ParserRuleC<ParserStateT> R>

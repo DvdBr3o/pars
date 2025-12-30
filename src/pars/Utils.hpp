@@ -5,6 +5,7 @@
 #include <utf8cpp/utf8.h>
 
 #include <string_view>
+#include <utility>
 #include <variant>
 
 namespace pars {
@@ -125,10 +126,32 @@ namespace pars {
 	template<typename T, typename... Ts>
 	inline static constexpr auto is_among_v = is_among<T, Ts...>::value;
 
-	template<typename T>
-	struct unique_variant {};
+	template<typename... T>
+	struct unique_variant_helper {};
+
+	template<typename... ChosenTs, typename CandT0, typename... CandTs>
+		requires is_among_v<CandT0, ChosenTs...>
+	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
+		public unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandTs...>> {};
+
+	template<typename... ChosenTs, typename CandT0, typename... CandTs>
+		requires(!is_among_v<CandT0, ChosenTs...>)
+	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
+		public unique_variant_helper<std::tuple<ChosenTs..., CandT0>, std::tuple<CandTs...>> {};
+
+	template<typename... ChosenTs>
+	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<>> {
+		using type = std::variant<ChosenTs...>;
+	};
 
 	template<typename... Ts>
-	struct unique_variant<std::variant<Ts...>> {};
+	struct unique_variant_helper<std::variant<Ts...>> :
+		public unique_variant_helper<std::tuple<>, std::tuple<Ts...>> {};
+
+	template<typename... Ts>
+	struct unique_variant : public unique_variant_helper<std::variant<Ts...>> {};
+
+	template<typename... Ts>
+	using unique_variant_t = unique_variant<Ts...>::type;
 
 }  // namespace pars

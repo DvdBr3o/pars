@@ -44,29 +44,25 @@ namespace pars::test::arithmetic {
 	static constexpr auto number	  = cran('0', '9');
 	static constexpr auto additive_op = cset(U'+', U'-', U'屮');
 
-	static constexpr auto foo		  = c('+') >> c('-') >> c('-') >> c('-');
+	static constexpr auto seq		  = c('+') >> c('-');
+	static constexpr auto choice	  = c('-') | c('+');
+	static constexpr auto opt		  = -c('+');
+	static constexpr auto oom		  = +c('+');
+	static constexpr auto rpt		  = *c('+');
 
 	TEST_CASE("parser can handle precedence.", "[arithmetic.precedence]") {
-		static constexpr auto script = u8R"(屮)";
+		static constexpr auto script = u8R"(+9)";
 
 		// +c('a');
 		//
-		ParserState st = { { script } };
+		ParserState st1 = { { u8R"(++++)" } };
+		ParserState st2 = { { u8R"(a-)" } };
 
-		SetConsoleOutputCP(CP_UTF8);
+		const auto	r1	= rpt.match(st1);
+		REQUIRE(r1);
+		REQUIRE(r1->size() == 4);
 
-		{
-			const auto res = additive_op.match(st);
-			if (res) {
-				fmt::print(fmt::emphasis::bold | fg(fmt::color::green), "[Info] ");
-				fmt::println("Received expected char: `{}`", to_utf8(*res));
-			} else {
-				const auto err = res.error();
-				fmt::print(fmt::emphasis::bold | fg(fmt::color::red), "[Error] ");
-				fmt::println("{}", err | overload { [](auto&& e) -> std::string {
-									   return e.to_string();
-								   } });
-			}
-		}
+		const auto r2 = rpt.match(st2);
+		REQUIRE(r2);
 	}
 }  // namespace pars::test::arithmetic
