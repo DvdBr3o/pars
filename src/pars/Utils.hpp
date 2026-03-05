@@ -11,210 +11,208 @@
 #include <variant>
 
 namespace pars {
-	namespace u8 {
-		class Cursor {
-		public:
-			inline static constexpr char32_t eof = 0;
+namespace u8 {
+class Cursor {
+public:
+	inline static constexpr char32_t eof = 0;
 
-		public:
-			constexpr Cursor(std::u8string_view sv) :
-				_cursor { (char*)sv.data() }, _begin { (char*)sv.data() }, _size { sv.size() } {}
+public:
+	constexpr Cursor(std::u8string_view sv) :
+		_cursor { (char*)sv.data() }, _begin { (char*)sv.data() }, _size { sv.size() } {}
 
-			constexpr explicit Cursor(std::string_view sv) :
-				_cursor { const_cast<char*>(sv.data()) },
-				_begin { sv.data() },
-				_size { sv.size() } {}
+	constexpr explicit Cursor(std::string_view sv) :
+		_cursor { const_cast<char*>(sv.data()) }, _begin { sv.data() }, _size { sv.size() } {}
 
-			Cursor(const Cursor&)				 = default;
-			Cursor(Cursor&&) noexcept			 = default;
-			Cursor& operator=(const Cursor&)	 = default;
-			Cursor& operator=(Cursor&&) noexcept = default;
+	Cursor(const Cursor&)				 = default;
+	Cursor(Cursor&&) noexcept			 = default;
+	Cursor& operator=(const Cursor&)	 = default;
+	Cursor& operator=(Cursor&&) noexcept = default;
 
-		public:
-			[[nodiscard]] constexpr auto begin() const { return _begin; }
+public:
+	[[nodiscard]] constexpr auto begin() const { return _begin; }
 
-			[[nodiscard]] constexpr auto size() const { return _size; }
+	[[nodiscard]] constexpr auto size() const { return _size; }
 
-			[[nodiscard]] constexpr auto end() const { return begin() + size(); }
+	[[nodiscard]] constexpr auto end() const { return begin() + size(); }
 
-			auto						 bump() -> char32_t {
-				try {
-					return utf8::next(_cursor, const_cast<char*>(end()));
-				} catch (const utf8::not_enough_room&) { return eof; }
-			}
-
-			[[nodiscard]] auto peek() const -> char32_t {
-				try {
-					return utf8::peek_next(_cursor, const_cast<char*>(end()));
-				} catch (const utf8::not_enough_room&) { return eof; }
-			}
-
-			auto prior() { return utf8::prior(_cursor, const_cast<char*>(begin())); }
-
-		private:
-			char*		_cursor;
-			const char* _begin;
-			size_t		_size;
-		};
-	}  // namespace u8
-
-	constexpr auto to_utf8(char32_t cp) -> std::string {
-		std::string out;
-		if (cp <= 0x7F) {
-			out.push_back(static_cast<char>(cp));
-		} else if (cp <= 0x7FF) {
-			out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else if (cp <= 0xFFFF) {
-			out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else if (cp <= 0x10FFFF) {
-			out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		}
-		return out;
+	auto						 bump() -> char32_t {
+		try {
+			return utf8::next(_cursor, const_cast<char*>(end()));
+		} catch (const utf8::not_enough_room&) { return eof; }
 	}
 
-	template<typename T>
-	struct value_type_of {
-		static_assert(false, "Value type undefined for `T`");
-	};
+	[[nodiscard]] auto peek() const -> char32_t {
+		try {
+			return utf8::peek_next(_cursor, const_cast<char*>(end()));
+		} catch (const utf8::not_enough_room&) { return eof; }
+	}
 
-	template<typename T, typename E>
-	struct value_type_of<tl::expected<T, E>> {
-		using type = T;
-	};
+	auto prior() { return utf8::prior(_cursor, const_cast<char*>(begin())); }
 
-	template<typename T>
-	using value_type_of_t = value_type_of<T>::type;
+private:
+	char*		_cursor;
+	const char* _begin;
+	size_t		_size;
+};
+}  // namespace u8
 
-	template<typename T>
-	struct error_type_of {
-		static_assert(false, "Error type undefined for `T`");
-	};
+constexpr auto to_utf8(char32_t cp) -> std::string {
+	std::string out;
+	if (cp <= 0x7F) {
+		out.push_back(static_cast<char>(cp));
+	} else if (cp <= 0x7FF) {
+		out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+	} else if (cp <= 0xFFFF) {
+		out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+		out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+	} else if (cp <= 0x10FFFF) {
+		out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+		out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+		out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+	}
+	return out;
+}
 
-	template<typename T, typename E>
-	struct error_type_of<tl::expected<T, E>> {
-		using type = E;
-	};
+template<typename T>
+struct value_type_of {
+	static_assert(false, "Value type undefined for `T`");
+};
 
-	template<typename T>
-	using error_type_of_t = error_type_of<T>::type;
+template<typename T, typename E>
+struct value_type_of<tl::expected<T, E>> {
+	using type = T;
+};
 
-	template<typename... Ts>
-	struct overload : Ts... {
-		using Ts::operator()...;
+template<typename T>
+using value_type_of_t = value_type_of<T>::type;
 
-		inline friend constexpr auto operator|(overload&& ov, auto&& v) {
-			return std::visit(ov, std::forward<decltype(v)>(v));
-		}
+template<typename T>
+struct error_type_of {
+	static_assert(false, "Error type undefined for `T`");
+};
 
-		inline friend constexpr auto operator|(auto&& v, overload&& ov) {
-			return std::visit(ov, std::forward<decltype(v)>(v));
-		}
-	};
+template<typename T, typename E>
+struct error_type_of<tl::expected<T, E>> {
+	using type = E;
+};
 
-	template<typename T, typename... Ts>
-	struct is_among {};
+template<typename T>
+using error_type_of_t = error_type_of<T>::type;
 
-	template<typename T>
-	struct is_among<T> : public std::false_type {};
+template<typename... Ts>
+struct overload : Ts... {
+	using Ts::operator()...;
 
-	template<typename T, typename... Ts>
-	struct is_among<T, T, Ts...> : public std::true_type {};
+	inline friend constexpr auto operator|(overload&& ov, auto&& v) {
+		return std::visit(ov, std::forward<decltype(v)>(v));
+	}
 
-	template<typename T, typename Telse, typename... Ts>
-	struct is_among<T, Telse, Ts...> : public is_among<T, Ts...> {};
+	inline friend constexpr auto operator|(auto&& v, overload&& ov) {
+		return std::visit(ov, std::forward<decltype(v)>(v));
+	}
+};
 
-	template<typename T, typename... Ts>
-	inline static constexpr auto is_among_v = is_among<T, Ts...>::value;
+template<typename T, typename... Ts>
+struct is_among {};
 
-	template<typename... T>
-	struct unique_variant_helper {};
+template<typename T>
+struct is_among<T> : public std::false_type {};
 
-	template<typename... ChosenTs, typename CandT0, typename... CandTs>
-		requires is_among_v<CandT0, ChosenTs...>
-	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
-		public unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandTs...>> {};
+template<typename T, typename... Ts>
+struct is_among<T, T, Ts...> : public std::true_type {};
 
-	template<typename... ChosenTs, typename CandT0, typename... CandTs>
-		requires(!is_among_v<CandT0, ChosenTs...>)
-	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
-		public unique_variant_helper<std::tuple<ChosenTs..., CandT0>, std::tuple<CandTs...>> {};
+template<typename T, typename Telse, typename... Ts>
+struct is_among<T, Telse, Ts...> : public is_among<T, Ts...> {};
 
-	template<typename... ChosenTs>
-	struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<>> {
-		using type = std::variant<ChosenTs...>;
-	};
+template<typename T, typename... Ts>
+inline static constexpr auto is_among_v = is_among<T, Ts...>::value;
 
-	template<typename... Ts>
-	struct unique_variant_helper<std::variant<Ts...>> :
-		public unique_variant_helper<std::tuple<>, std::tuple<Ts...>> {};
+template<typename... T>
+struct unique_variant_helper {};
 
-	template<typename... Ts>
-	struct unique_variant : public unique_variant_helper<std::variant<Ts...>> {};
+template<typename... ChosenTs, typename CandT0, typename... CandTs>
+	requires is_among_v<CandT0, ChosenTs...>
+struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
+	public unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandTs...>> {};
 
-	template<typename... Ts>
-	using unique_variant_t = unique_variant<Ts...>::type;
+template<typename... ChosenTs, typename CandT0, typename... CandTs>
+	requires(!is_among_v<CandT0, ChosenTs...>)
+struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<CandT0, CandTs...>> :
+	public unique_variant_helper<std::tuple<ChosenTs..., CandT0>, std::tuple<CandTs...>> {};
 
-	template<typename T>
-	struct tuple_like : std::false_type {};
+template<typename... ChosenTs>
+struct unique_variant_helper<std::tuple<ChosenTs...>, std::tuple<>> {
+	using type = std::variant<ChosenTs...>;
+};
 
-	template<typename... Ts>
-	struct tuple_like<std::tuple<Ts...>> : public std::true_type {};
+template<typename... Ts>
+struct unique_variant_helper<std::variant<Ts...>> :
+	public unique_variant_helper<std::tuple<>, std::tuple<Ts...>> {};
 
-	template<typename... Ts>
-	struct tuple_like<std::tuple<Ts...>&> : public std::true_type {};
+template<typename... Ts>
+struct unique_variant : public unique_variant_helper<std::variant<Ts...>> {};
 
-	template<typename... Ts>
-	struct tuple_like<const std::tuple<Ts...>&> : public std::true_type {};
+template<typename... Ts>
+using unique_variant_t = unique_variant<Ts...>::type;
 
-	template<typename... Ts>
-	struct tuple_like<std::tuple<Ts...>&&> : public std::true_type {};
+template<typename T>
+struct tuple_like : std::false_type {};
 
-	template<typename T>
-	inline static constexpr auto tuple_like_v = tuple_like<T>::value;
+template<typename... Ts>
+struct tuple_like<std::tuple<Ts...>> : public std::true_type {};
 
-	template<typename T>
-	concept tuple_like_c = tuple_like_v<T>;
+template<typename... Ts>
+struct tuple_like<std::tuple<Ts...>&> : public std::true_type {};
 
-	template<typename F, typename T>
-	struct tuple_apply_result {
-		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
-	};
+template<typename... Ts>
+struct tuple_like<const std::tuple<Ts...>&> : public std::true_type {};
 
-	template<typename F, typename T>
-	using tuple_apply_result_t = tuple_apply_result<F, T>::type;
+template<typename... Ts>
+struct tuple_like<std::tuple<Ts...>&&> : public std::true_type {};
 
-	template<typename F, typename T>
-	struct auto_tuple_apply_result {
-		using type = std::invoke_result_t<F, T&&>;
-	};
+template<typename T>
+inline static constexpr auto tuple_like_v = tuple_like<T>::value;
 
-	template<typename F, tuple_like_c T>
-	struct auto_tuple_apply_result<F, T> {
-		using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
-	};
+template<typename T>
+concept tuple_like_c = tuple_like_v<T>;
 
-	template<typename F, typename T>
-	using auto_tuple_apply_result_t = auto_tuple_apply_result<F, T>::type;
+template<typename F, typename T>
+struct tuple_apply_result {
+	using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
+};
 
-	template<typename F, typename T>
-	struct tuple_applyable : public std::false_type {};
+template<typename F, typename T>
+using tuple_apply_result_t = tuple_apply_result<F, T>::type;
 
-	template<typename F, tuple_like_c T>
-		requires requires(F f, T t) { std::apply(f, t); }
-	struct tuple_applyable<F, T> : public std::true_type {};
+template<typename F, typename T>
+struct auto_tuple_apply_result {
+	using type = std::invoke_result_t<F, T&&>;
+};
 
-	static_assert(tuple_applyable<decltype([](int, double) {}), std::tuple<int, double>>::value);
+template<typename F, tuple_like_c T>
+struct auto_tuple_apply_result<F, T> {
+	using type = decltype(std::apply(std::declval<F>(), std::declval<T>()));
+};
 
-	template<typename F, typename T>
-	inline static constexpr auto tuple_applyable_v = tuple_applyable<F, T>::value;
+template<typename F, typename T>
+using auto_tuple_apply_result_t = auto_tuple_apply_result<F, T>::type;
 
-	template<typename F, typename T>
-	concept tuple_applyable_c = tuple_applyable_v<F, T>;
+template<typename F, typename T>
+struct tuple_applyable : public std::false_type {};
+
+template<typename F, tuple_like_c T>
+	requires requires(F f, T t) { std::apply(f, t); }
+struct tuple_applyable<F, T> : public std::true_type {};
+
+static_assert(tuple_applyable<decltype([](int, double) {}), std::tuple<int, double>>::value);
+
+template<typename F, typename T>
+inline static constexpr auto tuple_applyable_v = tuple_applyable<F, T>::value;
+
+template<typename F, typename T>
+concept tuple_applyable_c = tuple_applyable_v<F, T>;
 
 }  // namespace pars
