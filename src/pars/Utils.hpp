@@ -18,10 +18,10 @@ public:
 
 public:
 	constexpr Cursor(std::u8string_view sv) :
-		_cursor { (char*)sv.data() }, _begin { (char*)sv.data() }, _size { sv.size() } {}
+		_cursor {(char*)sv.data()}, _begin {(char*)sv.data()}, _size {sv.size()} {}
 
 	constexpr explicit Cursor(std::string_view sv) :
-		_cursor { const_cast<char*>(sv.data()) }, _begin { sv.data() }, _size { sv.size() } {}
+		_cursor {const_cast<char*>(sv.data())}, _begin {sv.data()}, _size {sv.size()} {}
 
 	Cursor(const Cursor&)				 = default;
 	Cursor(Cursor&&) noexcept			 = default;
@@ -214,5 +214,189 @@ inline static constexpr auto tuple_applyable_v = tuple_applyable<F, T>::value;
 
 template<typename F, typename T>
 concept tuple_applyable_c = tuple_applyable_v<F, T>;
+
+template<typename T, template<typename...> class TemplT>
+struct is_like : std::false_type {};
+
+template<typename... Args, template<typename...> class TemplT>
+struct is_like<TemplT<Args...>, TemplT> : std::true_type {};
+
+template<typename T, template<typename...> class TemplT>
+inline constexpr auto is_like_v = is_like<T, TemplT>::value;
+
+template<typename T, template<typename...> class TemplT>
+concept Like = is_like<T, TemplT>::value;
+
+template<size_t N>
+struct U32StringLiteral {
+	inline static constexpr auto size = N;
+
+	std::array<char32_t, N>		 str;
+
+	constexpr U32StringLiteral(const char32_t (&arr)[N]) : str(arr, N) {}
+};
+
+template<size_t N>
+struct NoEndU32StringLiteral {
+	inline static constexpr auto size = N - 1;
+
+	std::array<char32_t, size>	 str;
+
+	constexpr NoEndU32StringLiteral(const char32_t (&arr)[N]) :
+		str([&]<size_t... Is>(std::index_sequence<Is...>) -> std::array<char32_t, size> {
+			return {arr[Is]...};
+		}(std::make_index_sequence<size>())) {}
+};
+
+template<typename TupToT, typename TupFromT>
+struct tuple_cup_two {};
+
+template<typename... TupToTs, typename TupFromT0, typename... TupFromTs>
+struct tuple_cup_two<std::tuple<TupToTs...>, std::tuple<TupFromT0, TupFromTs...>> {
+	using type = std::conditional_t<
+		is_among_v<TupFromT0, TupToTs...>,
+		typename tuple_cup_two<std::tuple<TupToTs...>, std::tuple<TupFromTs...>>::type,
+		typename tuple_cup_two<std::tuple<TupToTs..., TupFromT0>, std::tuple<TupFromTs...>>::type>;
+};
+
+template<typename... TupToTs>
+struct tuple_cup_two<std::tuple<TupToTs...>, std::tuple<>> {
+	using type = std::tuple<TupToTs...>;
+};
+
+template<Like<std::tuple>... TupTs>
+struct tuple_cup {};
+
+template<Like<std::tuple> TupT0, Like<std::tuple> TupT1, Like<std::tuple>... TupTs>
+struct tuple_cup<TupT0, TupT1, TupTs...> {
+	using type = tuple_cup<typename tuple_cup_two<TupT0, TupT1>::type, TupTs...>::type;
+};
+
+template<Like<std::tuple> TupT>
+struct tuple_cup<TupT> {
+	using type = TupT;
+};
+
+template<Like<std::tuple>... TupTs>
+using tuple_cup_t = tuple_cup<TupTs...>::type;
+
+template<typename InvokerT, typename TagT, typename... Args>
+concept MemTagInvocable = requires(InvokerT invoker, Args&&... args) {
+	std::forward<InvokerT>(invoker).tag_invoke(TagT(), std::forward<Args>(args)...);
+};
+template<typename InvokerT, typename TagT, typename... Args>
+concept FreeTagInvocable = requires(InvokerT invoker, Args&&... args) {
+	tag_invoke(TagT(), std::forward<InvokerT>(invoker), std::forward<Args>(args)...);
+};
+
+template<typename InvokerT, typename TagT, typename... Args>
+concept MemTagInvocableOnly =
+	MemTagInvocable<InvokerT, TagT, Args...> && !FreeTagInvocable<InvokerT, TagT, Args...>;
+template<typename InvokerT, typename TagT, typename... Args>
+concept FreeTagInvocableOnly =
+	FreeTagInvocable<InvokerT, TagT, Args...> && !MemTagInvocable<InvokerT, TagT, Args...>;
+
+template<typename InvokerT, typename TagT, typename... Args>
+concept TagInvocableAmbiguously =
+	MemTagInvocable<InvokerT, TagT, Args...> && FreeTagInvocable<InvokerT, TagT, Args...>;
+
+template<typename InvokerT, typename TagT, typename... Args>
+concept NoThrowMemTagInvocable = requires(InvokerT invoker, Args&&... args) {
+	{ std::forward<InvokerT>(invoker).tag_invoke(TagT(), std::forward<Args>(args)...) } noexcept;
+};
+template<typename InvokerT, typename TagT, typename... Args>
+concept NoThrowFreeTagInvocable = requires(InvokerT invoker, Args&&... args) {
+	{ tag_invoke(TagT(), std::forward<InvokerT>(invoker), std::forward<Args>(args)...) } noexcept;
+};
+
+template<typename InvokerT, typename TagT, typename... Args>
+concept TagInvocable =
+	FreeTagInvocable<InvokerT, TagT, Args...> || MemTagInvocable<InvokerT, TagT, Args...>;
+
+template<typename TagT, typename... Args>
+struct UnifiedCallOpClosure : public std::tuple<Args&&...> {
+	explicit constexpr UnifiedCallOpClosure(Args&&... args) :
+		std::tuple<Args&&...> {std::forward<Args>(args)...} {}
+
+	template<TagInvocableAmbiguously<TagT, Args...> InvokerT>
+	inline friend constexpr auto operator|(
+		InvokerT&& invoker, const UnifiedCallOpClosure& op
+	) noexcept(NoThrowFreeTagInvocable<InvokerT, TagT, Args...>) {
+		return std::apply(
+			[&](auto&&... args) {
+				return tag_invoke(
+					TagT(),
+					std::forward<InvokerT>(invoker),
+					std::forward<Args>(args)...
+				);
+			},
+			static_cast<const std::tuple<Args&&...>&>(op)
+		);
+	}
+
+	template<FreeTagInvocableOnly<TagT, Args...> InvokerT>
+	inline friend constexpr auto operator|(
+		InvokerT&& invoker, const UnifiedCallOpClosure& op
+	) noexcept(NoThrowFreeTagInvocable<InvokerT, TagT, Args...>) {
+		return std::apply(
+			[&](auto&&... args) {
+				return tag_invoke(
+					TagT(),
+					std::forward<InvokerT>(invoker),
+					std::forward<Args>(args)...
+				);
+			},
+			static_cast<const std::tuple<Args&&...>&>(op)
+		);
+	}
+
+	template<MemTagInvocableOnly<TagT, Args...> InvokerT>
+	inline friend constexpr auto operator|(
+		InvokerT&& invoker, const UnifiedCallOpClosure& op
+	) noexcept(NoThrowMemTagInvocable<InvokerT, TagT, Args...>) {
+		return std::apply(
+			[&](auto&&... args) {
+				return std::forward<InvokerT>(invoker).tag_invoke(
+					TagT(),
+					std::forward<Args>(args)...
+				);
+			},
+			static_cast<const std::tuple<Args&&...>&>(op)
+		);
+	}
+};
+
+template<typename TagT>
+struct UnifiedCallOp {
+	template<typename InvokerT, typename... Args>
+		requires TagInvocableAmbiguously<InvokerT, TagT, Args...>
+	inline constexpr auto operator()(
+		InvokerT&& invoker, Args&&... args
+	) const noexcept(NoThrowFreeTagInvocable<InvokerT, TagT, Args...>) -> decltype(auto) {
+		return tag_invoke(TagT(), std::forward<InvokerT>(invoker), std::forward<Args>(args)...);
+	}
+
+	template<typename InvokerT, typename... Args>
+		requires FreeTagInvocableOnly<InvokerT, TagT, Args...>
+	inline constexpr auto operator()(
+		InvokerT&& invoker, Args&&... args
+	) const noexcept(NoThrowFreeTagInvocable<InvokerT, TagT, Args...>) -> decltype(auto) {
+		return tag_invoke(TagT(), std::forward<InvokerT>(invoker), std::forward<Args>(args)...);
+	}
+
+	template<typename InvokerT, typename... Args>
+		requires MemTagInvocableOnly<InvokerT, TagT, Args...>
+	inline constexpr auto operator()(
+		InvokerT&& invoker, Args&&... args
+	) const noexcept(NoThrowMemTagInvocable<InvokerT, TagT, Args...>) -> decltype(auto) {
+		return std::forward<InvokerT>(invoker).tag_invoke(TagT(), std::forward<Args>(args)...);
+	}
+
+	template<typename... Args>
+	inline constexpr auto operator()(Args&&... args) const noexcept
+		-> UnifiedCallOpClosure<TagT, Args...> {
+		return UnifiedCallOpClosure<TagT, Args...> {std::forward<Args>(args)...};
+	}
+};
 
 }  // namespace pars
