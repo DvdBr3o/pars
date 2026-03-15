@@ -1,3 +1,6 @@
 Diagnostics:
   Suppress:
     - ast_file_not_found # module workaround
+
+Documentation:
+  CommentFormat: Doxygen

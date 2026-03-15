@@ -22,3 +22,8 @@ target("pars")
     add_headerfiles("src/**.hpp", {public = true})
     add_files("src/**.cpp", {public = true})
     add_includedirs("src", {public = true})
+
+    add_cxxflags("clang::-ftemplate-backtrace-limit=0", {public = true, force = true})
+    add_cxxflags("clang::-fconstexpr-backtrace-limit=0", {public = true, force = true})
+    add_cxxflags("clang::-fno-elide-type", {public = true, force = true})
+    

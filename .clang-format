@@ -56,7 +56,7 @@ BreakStringLiterals: False
 ColumnLimit: 100
 CommentPragmas: '^ LNUI_LINE_IGNORES_CLANG_FORMAT'
 CompactNamespaces: True
-Cpp11BracedListStyle: False
+# Cpp11BracedListStyle: False
 DeriveLineEnding: True
 DerivePointerAlignment: False # if True then other alignments would be covered.
 EmptyLineAfterAccessModifier: Leave

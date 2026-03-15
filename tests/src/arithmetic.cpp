@@ -1,10 +1,6 @@
 #include "pars.hpp"
 
 #include <catch2/catch_test_macros.hpp>
-#include <fmt/format.h>
-#include <fmt/color.h>
-
-#include <Windows.h>
 
 #include <string>
 #include <variant>

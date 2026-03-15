@@ -1,10 +1,10 @@
 #pragma once
 
-#include "fmt/base.h"
 #include "pars/Utils.hpp"
 
 #include <tl/expected.hpp>
 #include <fmt/format.h>
+#include <utf8cpp/utf8/cpp20.h>
 
 #include <optional>
 #include <algorithm>
@@ -117,9 +117,9 @@ struct ParserKit {
 			inline constexpr auto to_string() const {
 				return std::format(
 					"expect char in range [`{}`, `{}`], received `{}`.",
-					lo,
-					hi,
-					received
+					(char)lo,
+					(char)hi,
+					(char)received
 				);
 			}
 		};
@@ -347,6 +347,7 @@ struct ParserKit {
 			auto  first_match = this->R::match(ps);
 			if (first_match) {
 				val.emplace_back(std::move(*first_match));
+				restore = ps.store();
 				while (auto m = this->R::match(ps)) {
 					val.emplace_back(std::move(*m));
 					restore = ps.store();
@@ -544,6 +545,14 @@ struct ParserKit {
 		};
 	}
 
+	template<Like<OptionalRule> R, Like<overload> O>
+	[[nodiscard]] inline friend constexpr auto operator%(R&& r, O&& o) noexcept {
+		return ValueTransformRule {
+			[&](auto&& v) { return std::visit(o, std::forward<decltype(v)>(v)); },
+			std::forward<R>(r),
+		};
+	}
+
 	template<ParserRuleC<ParserStateT> R, typename F>
 	[[nodiscard]] inline friend constexpr auto operator%(
 		R&& r, ResultTransformFunctor<F>&& f
@@ -591,5 +600,32 @@ template<typename... Ts>
 using PeekNotRule = ParserKit<>::PeekNotRule<Ts...>;
 template<typename... Ts>
 using PeekIsRule = ParserKit<>::PeekIsRule<Ts...>;
+
+template<size_t N>
+inline constexpr auto repeat(auto&& rule) {
+	static_assert(N > 0, "N must be greater than 0!");
+	if constexpr (N == 1)
+		return std::forward<decltype(rule)>(rule);
+	else
+		return std::forward<decltype(rule)>(rule)
+			>> repeat<N - 1>(std::forward<decltype(rule)>(rule));
+}
+
+template<typename... Rules>
+inline constexpr auto wrap(Rules&&... rules) -> decltype(auto) {
+	return SequentialRule<Rules...> { std::forward<Rules>(rules)... }
+		 % value_to([]<typename... Args>(Args&&... args) {
+			   return std::tuple { std::forward<Args>(args)... };
+		   });
+}
+
+struct skip {
+	template<typename T>
+	constexpr skip(T&&) noexcept {}
+};
+
+inline auto u32chars_to_u8(const std::vector<char32_t>& s) {
+	return utf8::utf32to8(std::u32string_view { (const char32_t* const)s.data(), s.size() });
+}
 
 }  // namespace pars

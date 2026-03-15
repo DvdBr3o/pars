@@ -399,4 +399,82 @@ struct UnifiedCallOp {
 	}
 };
 
+struct Ignore {
+	[[clang::always_inline]] [[gnu::always_inline]]
+	inline constexpr Ignore(auto&&...) {}
+};
+
+template<typename SigT0, typename SigT1>
+struct signature_cat_two {};
+
+template<typename ResT, typename... Arg1Ts, typename Arg2T0, typename... Arg2Ts>
+struct signature_cat_two<ResT(Arg1Ts...), ResT(Arg2T0, Arg2Ts...)> {
+	using type = std::conditional_t<
+		is_among_v<Arg2T0, Arg1Ts...>,
+		typename signature_cat_two<ResT(Arg1Ts...), ResT(Arg2Ts...)>::type,
+		typename signature_cat_two<ResT(Arg1Ts..., Arg2T0), ResT(Arg2Ts...)>::type>;
+};
+
+template<typename ResT, typename... Arg1Ts>
+struct signature_cat_two<ResT(Arg1Ts...), ResT()> {
+	using type = ResT(Arg1Ts...);
+};
+
+template<typename... SigTs>
+struct signature_cat {};
+
+template<typename SigT0, typename SigT1, typename... SigTs>
+struct signature_cat<SigT0, SigT1, SigTs...> {
+	using type = signature_cat_two<typename signature_cat_two<SigT0, SigT1>::type, SigTs...>::type;
+};
+
+template<typename SigT>
+struct signature_cat<SigT> {
+	using type = SigT;
+};
+
+template<typename... SigTs>
+using signature_cup_t = signature_cat<SigTs...>::type;
+
+template<template<typename...> class TemplT, typename SigT>
+struct apply_signature {};
+
+template<template<typename...> class TemplT, typename ResT, typename... Args>
+struct apply_signature<TemplT, ResT(Args...)> {
+	using type = TemplT<Args...>;
+};
+
+template<template<typename...> class TemplT, typename SigT>
+using apply_signature_t = apply_signature<TemplT, SigT>::type;
+
+template<typename T, typename BaseT>
+struct signature_based_on : std::false_type {};
+
+template<typename BaseT, typename ResT, typename... Args>
+struct signature_based_on<ResT(Args...), BaseT> : std::true_type {};
+
+struct apply_t {};
+
+inline constexpr auto apply = UnifiedCallOp<apply_t> {};
+
+// template<Like<std::tuple> TupleT, typename F>
+// inline constexpr auto tag_invoke(apply_t, TupleT&& tuple, F&& f) -> decltype(auto) {
+// 	return std::apply(std::forward<F>(f), std ::forward<TupleT>(tuple));
+// }
+template<typename... Args, typename F>
+inline constexpr auto tag_invoke(apply_t, std::tuple<Args...>&& tuple, F&& f) -> decltype(auto) {
+	return std::apply(std::forward<F>(f), std::move(tuple));
+}
+
+template<typename... Args, typename F>
+inline constexpr auto tag_invoke(apply_t, std::tuple<Args...>& tuple, F&& f) -> decltype(auto) {
+	return std::apply(std::forward<F>(f), tuple);
+}
+
+template<typename... Args, typename F>
+inline constexpr auto tag_invoke(apply_t, const std::tuple<Args...>& tuple, F&& f)
+	-> decltype(auto) {
+	return std::apply(std::forward<F>(f), tuple);
+}
+
 }  // namespace pars

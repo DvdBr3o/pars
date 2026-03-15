@@ -7,42 +7,53 @@
 #include <string_view>
 
 namespace pars::test::markdown {
-static constexpr auto space = cset(U' ', U'\t') % [](auto&&) {
-	fmt::println("space!");
-	return std::monostate();
-};
-static constexpr auto cnot = [](char32_t ch) {
-	return (!c(ch) >> cany) % [](auto&&, auto c) -> char32_t { return c; };
+inline constexpr auto space = cset(U' ', U'\t') % [](skip) { return std::monostate(); };
+inline constexpr auto cnot	= [](auto... cs) constexpr {
+	 return (!(c(cs) | ...) >> cany) % [](skip, auto c) -> char32_t { return c; };
 };
 
 template<size_t N>
-static constexpr auto _pre_heading() {
-	if constexpr (N == 0)
-		return +space;
-	else
-		return c('#') >> _pre_heading<N - 1>();
+inline constexpr auto heading = []() constexpr {
+	return	// clang-format off
+		(wrap(repeat<N>(c('#')))     >> +space       >> +cnot('\n')       >> -c('\n'))	
+	% [](skip, 					    	 skip,       	 auto&& heading,      skip
+		) -> std::string {
+			// clang-format on
+			return utf8::utf32to8(
+				std::u32string_view { (const char32_t* const)heading.data(), heading.size() }
+			);
+		};
 };
 
-template<size_t N>
-static constexpr auto pre_heading() {
-	return _pre_heading<N>() % value_to([](auto&&...) { return std::monostate(); });
-}
+inline constexpr auto h1 = heading<1>();
+inline constexpr auto h2 = heading<2>();
+inline constexpr auto h3 = heading<3>();
+inline constexpr auto h4 = heading<4>();
+inline constexpr auto h5 = heading<5>();
 
-template<size_t N>
-static constexpr auto heading() {
-	return (pre_heading<N>() >> +cnot('\n') >> -c('\n')) %
-			   [](auto&&, auto&& heading, auto&&) -> std::string {
-		return utf8::utf32to8(
-			std::u32string_view { (const char32_t* const)heading.data(), heading.size() }
-		);
+struct LatexBlock {
+	enum class Kind {
+		Inline,
+		Display,
+	};
+
+	Kind		kind;
+	std::string content;
+};
+
+inline constexpr auto dollar_escape = (c('\\') >> c('$')) % [](skip, skip) { return '$'; };	 // \$
+inline constexpr auto inline_latex_block_char =												 //
+	(dollar_escape | cnot('$', '\n'))														 //
+	% [](auto c) -> char32_t {
+	return std::visit(overload { [](auto&& s) -> char32_t { return s; } }, c);
+};
+inline constexpr auto inline_latex_block =	//
+	(c('$') >> +inline_latex_block_char >> c('$')) % [](skip, auto&& s, skip) -> LatexBlock {
+	return {
+		.kind	 = LatexBlock::Kind::Inline,
+		.content = u32chars_to_u8(s),
 	};
 };
-
-static constexpr auto h1 = heading<1>();
-static constexpr auto h2 = heading<2>();
-static constexpr auto h3 = heading<3>();
-static constexpr auto h4 = heading<4>();
-static constexpr auto h5 = heading<5>();
 
 TEST_CASE("markdown rule can parse headings.", "[markdown.heading]") {
 	auto ps1 = ParserState { {
@@ -60,7 +71,15 @@ TEST_CASE("markdown rule can parse headings.", "[markdown.heading]") {
 	REQUIRE(h5.match(ps1).value() == "Im Heading5");
 }
 
-TEST_CASE("markdown rule can parse latex blocks.", "[markdown.latex.block]") {}
+TEST_CASE("markdown rule can parse latex blocks.", "[markdown.latex.block]") {
+	{
+		constexpr auto script = u8"$a^2 + b^2 \\$ = c^2$";
+		auto		   ps1	  = ParserState { { script } };
+		REQUIRE(inline_latex_block.match(ps1)->content == "a^2 + b^2 $ = c^2");
+	}
+
+	{}
+}
 
 TEST_CASE("markdown rule can parse inline latex blocks.", "[markdown.latex.inline]") {}
 }  // namespace pars::test::markdown
