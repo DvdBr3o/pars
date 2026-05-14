@@ -8,6 +8,12 @@ end
 
 add_rules("mode.debug", "mode.release")
 
+option("build_examples")
+    set_default(false)
+    set_description("Whether to build examples.")
+    set_showmenu(true)
+option_end()
+
 includes("tests")
 
 add_requires("range-v3")
@@ -24,11 +30,6 @@ target("pars")
     add_packages("utfcpp", {public = true})
     add_packages("fmt", {public = true})
 
-    add_headerfiles("src/**.hpp", {public = true})
+    add_headerfiles("src/(**.hpp)", {public = true})
     add_files("src/**.cpp", {public = true})
     add_includedirs("src", {public = true})
-
-    -- add_cxxflags("clang::-ftemplate-backtrace-limit=0", {public = true, force = true})
-    -- add_cxxflags("clang::-fconstexpr-backtrace-limit=0", {public = true, force = true})
-    -- add_cxxflags("clang::-fno-elide-type", {public = true, force = true})
-    
