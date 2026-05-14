@@ -46,16 +46,13 @@ static constexpr auto opt		  = -c('+');
 static constexpr auto oom		  = +c('+');
 static constexpr auto rpt		  = *c('+');
 static constexpr auto pis		  = ~c('+');
-static constexpr auto vt		  = ~c('+') % value_to([](auto c) {});
-static constexpr auto vt2		  = ~c('+') % [](auto c) {};
-static constexpr auto seqrt		  = seq % [](auto c1, auto c2) {};
+static constexpr auto vt		  = ~c('+') ^ value_to([](auto c) {});
+static constexpr auto vt2		  = ~c('+') ^ value_to([](auto c) {});
+static constexpr auto seqrt		  = seq ^ value_to([](auto c1, auto c2) {});
 
 TEST_CASE("parser can handle precedence.", "[arithmetic.precedence]") {
-	static constexpr auto script = u8R"(+9)";
-
-	//
-	ParserState st1 = { { u8R"(++++)" } };
-	ParserState st2 = { { u8R"(a-)" } };
+	auto st1 = TextParserState {u8R"(++++)"};
+	auto st2 = TextParserState {u8R"(a-)"};
 
 	REQUIRE((~c('+')).match(st1));
 	REQUIRE(!(~c('-')).match(st1));

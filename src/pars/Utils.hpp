@@ -5,16 +5,21 @@
 #include <utf8cpp/utf8.h>
 #include <fmt/format.h>
 
+#include <array>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace pars {
 namespace u8 {
 class Cursor {
 public:
 	inline static constexpr char32_t eof = 0;
+	using value_type				 = char32_t;
 
 public:
 	constexpr Cursor(std::u8string_view sv) :
@@ -56,6 +61,57 @@ private:
 };
 }  // namespace u8
 
+namespace seq {
+template<typename T>
+class Cursor {
+public:
+	using value_type = T;
+	inline static constexpr value_type eof = value_type {};
+
+public:
+	constexpr Cursor(std::span<const value_type> stream) : _cursor {stream.data()}, _stream {stream} {}
+
+	template<size_t N>
+	constexpr Cursor(const std::array<value_type, N>& stream) : Cursor(std::span {stream}) {}
+
+	constexpr Cursor(const std::vector<value_type>& stream) : Cursor(std::span {stream}) {}
+
+	Cursor(const Cursor&)				 = default;
+	Cursor(Cursor&&) noexcept			 = default;
+	Cursor& operator=(const Cursor&)	 = default;
+	Cursor& operator=(Cursor&&) noexcept = default;
+
+public:
+	[[nodiscard]] constexpr auto begin() const { return _stream.data(); }
+
+	[[nodiscard]] constexpr auto size() const { return _stream.size(); }
+
+	[[nodiscard]] constexpr auto end() const { return begin() + size(); }
+
+	[[nodiscard]] constexpr auto peek() const -> value_type {
+		if (_cursor == end())
+			return eof;
+		return *_cursor;
+	}
+
+	constexpr auto bump() -> value_type {
+		if (_cursor == end())
+			return eof;
+		return *_cursor++;
+	}
+
+	constexpr auto prior() -> value_type {
+		if (_cursor == begin())
+			return eof;
+		return *--_cursor;
+	}
+
+private:
+	const value_type*		_cursor;
+	std::span<const value_type> _stream;
+};
+}  // namespace seq
+
 constexpr auto to_utf8(char32_t cp) -> std::string {
 	std::string out;
 	if (cp <= 0x7F) {
@@ -77,30 +133,17 @@ constexpr auto to_utf8(char32_t cp) -> std::string {
 }
 
 template<typename T>
+inline constexpr bool dependent_false_v = false;
+
+template<typename T, typename = void>
 struct value_type_of {
-	static_assert(false, "Value type undefined for `T`");
+	static_assert(dependent_false_v<T>, "Value type undefined for `T`");
 };
 
-template<typename T, typename E>
-struct value_type_of<tl::expected<T, E>> {
-	using type = T;
-};
-
-template<typename T>
-using value_type_of_t = value_type_of<T>::type;
-
-template<typename T>
+template<typename T, typename = void>
 struct error_type_of {
-	static_assert(false, "Error type undefined for `T`");
+	static_assert(dependent_false_v<T>, "Error type undefined for `T`");
 };
-
-template<typename T, typename E>
-struct error_type_of<tl::expected<T, E>> {
-	using type = E;
-};
-
-template<typename T>
-using error_type_of_t = error_type_of<T>::type;
 
 template<typename... Ts>
 struct overload : Ts... {
@@ -226,6 +269,19 @@ inline constexpr auto is_like_v = is_like<T, TemplT>::value;
 
 template<typename T, template<typename...> class TemplT>
 concept Like = is_like<T, TemplT>::value;
+
+template<typename T>
+struct simplify_single_type_variant {
+	using type = T;
+};
+
+template<typename T>
+struct simplify_single_type_variant<std::variant<T>> {
+	using type = T;
+};
+
+template<typename T>
+using simplify_single_type_variant_t = simplify_single_type_variant<T>::type;
 
 template<size_t N>
 struct U32StringLiteral {
@@ -404,37 +460,146 @@ struct Ignore {
 	inline constexpr Ignore(auto&&...) {}
 };
 
+struct value_of_t {};
+
+struct error_of_t {};
+
+inline constexpr auto value_of = UnifiedCallOp<value_of_t> {};
+inline constexpr auto error_of = UnifiedCallOp<error_of_t> {};
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(value_of_t, tl::expected<T, E>& result) {
+	return result.value();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(value_of_t, const tl::expected<T, E>& result) {
+	return result.value();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(value_of_t, tl::expected<T, E>&& result) {
+	return std::move(result).value();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(value_of_t, const tl::expected<T, E>&& result) {
+	return std::move(result).value();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(error_of_t, tl::expected<T, E>& result) {
+	return result.error();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(error_of_t, const tl::expected<T, E>& result) {
+	return result.error();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(error_of_t, tl::expected<T, E>&& result) {
+	return std::move(result).error();
+}
+
+template<typename T, typename E>
+inline constexpr decltype(auto) tag_invoke(error_of_t, const tl::expected<T, E>&& result) {
+	return std::move(result).error();
+}
+
+template<typename T>
+inline constexpr decltype(auto) tag_invoke(value_of_t, std::optional<T>& result) {
+	return *result;
+}
+
+template<typename T>
+inline constexpr decltype(auto) tag_invoke(value_of_t, const std::optional<T>& result) {
+	return *result;
+}
+
+template<typename T>
+inline constexpr decltype(auto) tag_invoke(value_of_t, std::optional<T>&& result) {
+	return *std::move(result);
+}
+
+template<typename T>
+inline constexpr decltype(auto) tag_invoke(value_of_t, const std::optional<T>&& result) {
+	return *std::move(result);
+}
+
+template<typename T>
+inline constexpr auto tag_invoke(error_of_t, std::optional<T>&) -> std::monostate {
+	return {};
+}
+
+template<typename T>
+inline constexpr auto tag_invoke(error_of_t, const std::optional<T>&) -> std::monostate {
+	return {};
+}
+
+template<typename T>
+inline constexpr auto tag_invoke(error_of_t, std::optional<T>&&) -> std::monostate {
+	return {};
+}
+
+template<typename T>
+inline constexpr auto tag_invoke(error_of_t, const std::optional<T>&&) -> std::monostate {
+	return {};
+}
+
+inline constexpr auto tag_invoke(value_of_t, std::monostate value) -> std::monostate { return value; }
+
+inline constexpr auto tag_invoke(error_of_t, std::monostate value) -> std::monostate { return value; }
+
+template<typename T>
+	requires TagInvocable<T&, value_of_t>
+struct value_type_of<T, void> {
+	using type = std::remove_cvref_t<decltype(value_of(std::declval<T&>()))>;
+};
+
+template<typename T>
+using value_type_of_t = typename value_type_of<std::remove_cvref_t<T>>::type;
+
+template<typename T>
+	requires TagInvocable<T&, error_of_t>
+struct error_type_of<T, void> {
+	using type = std::remove_cvref_t<decltype(error_of(std::declval<T&>()))>;
+};
+
+template<typename T>
+using error_type_of_t = typename error_type_of<std::remove_cvref_t<T>>::type;
+
 template<typename SigT0, typename SigT1>
-struct signature_cat_two {};
+struct signature_cup_two {};
 
 template<typename ResT, typename... Arg1Ts, typename Arg2T0, typename... Arg2Ts>
-struct signature_cat_two<ResT(Arg1Ts...), ResT(Arg2T0, Arg2Ts...)> {
+struct signature_cup_two<ResT(Arg1Ts...), ResT(Arg2T0, Arg2Ts...)> {
 	using type = std::conditional_t<
 		is_among_v<Arg2T0, Arg1Ts...>,
-		typename signature_cat_two<ResT(Arg1Ts...), ResT(Arg2Ts...)>::type,
-		typename signature_cat_two<ResT(Arg1Ts..., Arg2T0), ResT(Arg2Ts...)>::type>;
+		typename signature_cup_two<ResT(Arg1Ts...), ResT(Arg2Ts...)>::type,
+		typename signature_cup_two<ResT(Arg1Ts..., Arg2T0), ResT(Arg2Ts...)>::type>;
 };
 
 template<typename ResT, typename... Arg1Ts>
-struct signature_cat_two<ResT(Arg1Ts...), ResT()> {
+struct signature_cup_two<ResT(Arg1Ts...), ResT()> {
 	using type = ResT(Arg1Ts...);
 };
 
 template<typename... SigTs>
-struct signature_cat {};
+struct signature_cup {};
 
 template<typename SigT0, typename SigT1, typename... SigTs>
-struct signature_cat<SigT0, SigT1, SigTs...> {
-	using type = signature_cat_two<typename signature_cat_two<SigT0, SigT1>::type, SigTs...>::type;
+struct signature_cup<SigT0, SigT1, SigTs...> {
+	using type = signature_cup<typename signature_cup_two<SigT0, SigT1>::type, SigTs...>::type;
 };
 
 template<typename SigT>
-struct signature_cat<SigT> {
+struct signature_cup<SigT> {
 	using type = SigT;
 };
 
 template<typename... SigTs>
-using signature_cup_t = signature_cat<SigTs...>::type;
+using signature_cup_t = signature_cup<SigTs...>::type;
 
 template<template<typename...> class TemplT, typename SigT>
 struct apply_signature {};

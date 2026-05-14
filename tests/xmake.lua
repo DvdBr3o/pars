@@ -14,7 +14,7 @@ pars_test = function(test)
 end
 
 pars_test("basic")
-pars_test("basic_v2")
 pars_test("arithmetic")
 pars_test("markdown")
-
+pars_test("luna")
+pars_test("luna_v2")
