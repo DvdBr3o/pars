@@ -30,6 +30,6 @@ target("pars")
     add_packages("utfcpp", {public = true})
     add_packages("fmt", {public = true})
 
-    add_headerfiles("src/(**.hpp)", {public = true})
+    add_headerfiles("(src/**.hpp)", {public = true})
     add_files("src/**.cpp", {public = true})
     add_includedirs("src", {public = true})
