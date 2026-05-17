@@ -82,18 +82,16 @@ struct MarkdownRuleError {
 	}
 };
 
-inline constexpr auto ignored = []<typename... Ts>(Ts&&...) constexpr { return skip {0}; };
-inline constexpr auto as_char = [](auto&& v) constexpr -> char32_t {
+constexpr auto ignored = []<typename... Ts>(Ts&&...) constexpr { return skip {0}; };
+constexpr auto as_char = [](auto&& v) constexpr -> char32_t {
 	using T = std::remove_cvref_t<decltype(v)>;
 	if constexpr (std::same_as<T, char32_t>)
 		return v;
 	else
 		return std::visit(overload {[](char32_t ch) constexpr { return ch; }}, v);
 };
-inline constexpr auto join_chars = [](const auto& chars) -> std::string {
-	return u32chars_to_u8(chars);
-};
-inline constexpr auto join_lines = [](const auto& lines) -> std::string {
+constexpr auto join_chars = [](const auto& chars) -> std::string { return u32chars_to_u8(chars); };
+constexpr auto join_lines = [](const auto& lines) -> std::string {
 	std::string out;
 	for (size_t i = 0; i < lines.size(); ++i) {
 		if (i != 0)
@@ -103,26 +101,26 @@ inline constexpr auto join_lines = [](const auto& lines) -> std::string {
 	return out;
 };
 
-inline constexpr auto space = cset(U' ', U'\t') ^ value_to([](auto) constexpr { return skip {0}; });
-inline constexpr auto spaces1	  = (+space) ^ value_to(ignored);
-inline constexpr auto newline	  = c('\n') ^ value_to([](auto) constexpr { return skip {0}; });
-inline constexpr auto opt_newline = -c('\n') ^ value_to(ignored);
-inline constexpr auto digit		  = cran(U'0', U'9');
+constexpr auto space	   = cset(U' ', U'\t') ^ value_to([](auto) constexpr { return skip {0}; });
+constexpr auto spaces1	   = (+space) ^ value_to(ignored);
+constexpr auto newline	   = c('\n') ^ value_to([](auto) constexpr { return skip {0}; });
+constexpr auto opt_newline = -c('\n') ^ value_to(ignored);
+constexpr auto digit	   = cran(U'0', U'9');
 
-inline constexpr auto cnot		  = []<typename... Chs>(Chs... chs) constexpr {
-	   return (!(c(chs) | ...) >> cany)
-			^ value_to([](auto, auto ch) constexpr -> char32_t { return ch; });
+constexpr auto cnot		   = []<typename... Chs>(Chs... chs) constexpr {
+	return (!(c(chs) | ...) >> cany)
+		 ^ value_to([](auto, auto ch) constexpr -> char32_t { return ch; });
 };
 
-inline constexpr auto line_chars  = +cnot('\n');
-inline constexpr auto line_chars0 = *cnot('\n');
-inline constexpr auto line_text	  = line_chars ^ value_to(join_chars);
-inline constexpr auto line_text0  = line_chars0 ^ value_to(join_chars);
-inline constexpr auto quote_text =
+constexpr auto line_chars  = +cnot('\n');
+constexpr auto line_chars0 = *cnot('\n');
+constexpr auto line_text   = line_chars ^ value_to(join_chars);
+constexpr auto line_text0  = line_chars0 ^ value_to(join_chars);
+constexpr auto quote_text =
 	line_text ^ value_to([](const std::string& s) -> BlockQuote { return {.text = s}; });
 
 template<size_t N>
-inline constexpr auto heading = []() constexpr {
+constexpr auto heading = []() constexpr {
 	return (repeat<N>(c('#')) >> spaces1 >> line_text >> opt_newline)
 		 ^ value_to([]<typename... Args>(Args&&... args) -> Heading {
 			   auto tup = std::forward_as_tuple(args...);
@@ -133,19 +131,19 @@ inline constexpr auto heading = []() constexpr {
 		   });
 };
 
-inline constexpr auto h1 = heading<1>();
-inline constexpr auto h2 = heading<2>();
-inline constexpr auto h3 = heading<3>();
-inline constexpr auto h4 = heading<4>();
-inline constexpr auto h5 = heading<5>();
-inline constexpr auto h6 = heading<6>();
+constexpr auto h1 = heading<1>();
+constexpr auto h2 = heading<2>();
+constexpr auto h3 = heading<3>();
+constexpr auto h4 = heading<4>();
+constexpr auto h5 = heading<5>();
+constexpr auto h6 = heading<6>();
 
-inline constexpr auto paragraph =
+constexpr auto paragraph =
 	(line_text >> opt_newline) ^ value_to([](const std::string& text, auto&&) -> Paragraph {
 		return Paragraph {.text = text};
 	});
 
-inline constexpr auto unordered_list_marker =
+constexpr auto unordered_list_marker =
 	(cset(U'-', U'+', U'*') >> +space)
 	^ with_effect<required_query_t(QueryMarkdownBlockContext)>([](auto&&	  state,
 																  const auto& spaces) constexpr {
@@ -154,7 +152,7 @@ inline constexpr auto unordered_list_marker =
 	  })
 	^ value_to(ignored);
 
-inline constexpr auto ordered_list_marker =
+constexpr auto ordered_list_marker =
 	(+digit >> cset(U'.', U')') >> +space)
 	^ with_effect<required_query_t(QueryMarkdownBlockContext)>([](auto&&	  state,
 																  const auto& marker) constexpr {
@@ -189,14 +187,14 @@ struct ContinuationIndentRule {
 	}
 };
 
-inline constexpr auto block_quote =
-	(c('>') >> -c(' ') >> line_text >> opt_newline)
+constexpr auto block_quote =
+	c('>') >> -c(' ') >> line_text >> opt_newline
 	^ value_to([](auto, auto&&, const std::string& text, auto&&) -> BlockQuote {
 		  return {.text = text};
 	  });
 
-inline constexpr auto list_item_body =
-	(line_text >> *((newline >> ContinuationIndentRule {} >> line_text)) >> opt_newline)
+constexpr auto list_item_body =
+	line_text >> *((newline >> ContinuationIndentRule {} >> line_text)) >> opt_newline
 	^ value_to([](const std::string& first, const auto& tails, auto) -> ListItem {
 		  std::string text = first;
 		  for (const auto& tail : tails) {
@@ -206,54 +204,55 @@ inline constexpr auto list_item_body =
 		  return {.text = std::move(text)};
 	  });
 
-inline constexpr auto unordered_list_item =
-	(unordered_list_marker >> list_item_body)
-	^ value_to([](auto, const ListItem& item) -> ListItem { return item; });
+constexpr auto unordered_list_item = unordered_list_marker >> list_item_body
+								   ^ value_to([](auto, const ListItem& item) -> ListItem {
+										 return item;
+									 });
 
-inline constexpr auto ordered_list_item =
-	(ordered_list_marker >> list_item_body)
-	^ value_to([](auto, const ListItem& item) -> ListItem { return item; });
+constexpr auto ordered_list_item   = ordered_list_marker >> list_item_body
+								   ^ value_to([](auto, const ListItem& item) -> ListItem {
+									   return item;
+									 });
 
-inline constexpr auto unordered_list =
-	(+unordered_list_item) ^ value_to([](const auto& items) -> UnorderedList {
+constexpr auto unordered_list =
+	+unordered_list_item ^ value_to([](const auto& items) -> UnorderedList {
 		return {
 			.items = {items.begin(), items.end()}
 		};
 	});
 
-inline constexpr auto ordered_list =
-	(+ordered_list_item) ^ value_to([](const auto& items) -> OrderedList {
-		return {
-			.items = {items.begin(), items.end()}
-		};
-	});
+constexpr auto ordered_list = +ordered_list_item ^ value_to([](const auto& items) -> OrderedList {
+	return {
+		.items = {items.begin(), items.end()}
+	};
+});
 
 template<char32_t Marker>
-inline constexpr auto thematic_break_of = []() constexpr {
+constexpr auto thematic_break_of = []() constexpr {
 	constexpr auto unit = c(Marker) >> *space;
-	return (repeat<3>(unit) >> *unit >> opt_newline)
+	return repeat<3>(unit) >> *unit >> opt_newline
 		 ^ value_to([](auto&&...) -> ThematicBreak { return {}; });
 };
 
-inline constexpr auto thematic_break =
+constexpr auto thematic_break =
 	(thematic_break_of<U'*'>() | thematic_break_of<U'-'>() | thematic_break_of<U'_'>())
 	^ value_to([](auto&&) -> ThematicBreak { return {}; });
 
-inline constexpr auto fence_info = (*cnot('\n')) ^ value_to([](const auto& chars) -> std::string {
-									   return u32chars_to_u8(chars);
-								   });
-inline constexpr auto fenced_code_open =
-	(repeat<3>(c('`')) >> -fence_info >> newline)
+constexpr auto fence_info = (*cnot('\n')) ^ value_to([](const auto& chars) -> std::string {
+								return u32chars_to_u8(chars);
+							});
+constexpr auto fenced_code_open =
+	repeat<3>(c('`')) >> -fence_info >> newline
 	^ value_to([](auto, auto, auto, const auto& info, auto) -> std::string {
 		  return info.value_or(std::string {});
 	  });
-inline constexpr auto fenced_code_close =
-	(repeat<3>(c('`')) >> *space >> opt_newline) ^ value_to(ignored);
-inline constexpr auto fenced_code_line =
-	(line_text0 >> opt_newline)
-	^ value_to([](const std::string& line, auto) -> std::string { return line; });
-inline constexpr auto fenced_code_block =
-	(fenced_code_open >> *((!fenced_code_close >> fenced_code_line)) >> fenced_code_close)
+constexpr auto fenced_code_close = repeat<3>(c('`')) >> *space >> opt_newline ^ value_to(ignored);
+constexpr auto fenced_code_line	 = line_text0 >> opt_newline
+								 ^ value_to([](const std::string& line, auto) -> std::string {
+									  return line;
+								   });
+constexpr auto fenced_code_block =
+	fenced_code_open >> *((!fenced_code_close >> fenced_code_line)) >> fenced_code_close
 	^ value_to([](const std::string& info, const auto& lines, auto) -> FencedCodeBlock {
 		  std::vector<std::string> content_lines;
 		  content_lines.reserve(lines.size());
@@ -264,9 +263,9 @@ inline constexpr auto fenced_code_block =
 		  };
 	  });
 
-inline constexpr auto block = h6 | h5 | h4 | h3 | h2 | h1 | thematic_break | fenced_code_block
-							| block_quote | unordered_list | ordered_list | paragraph;
-inline constexpr auto document = *block;
+constexpr auto block	= h6 | h5 | h4 | h3 | h2 | h1 | thematic_break | fenced_code_block
+						| block_quote | unordered_list | ordered_list | paragraph;
+constexpr auto document = *block;
 
 struct LatexBlock {
 	enum class Kind {
@@ -279,58 +278,57 @@ struct LatexBlock {
 
 using Inline = std::variant<Text, Emphasis, StrongEmphasis, CodeSpan, Link, LatexBlock>;
 
-inline constexpr auto dollar_escape =
-	(c('\\') >> c('$')) ^ value_to([](auto, auto) constexpr { return U'$'; });
-inline constexpr auto inline_latex_char =
+constexpr auto dollar_escape = c('\\') >> c('$')
+							 ^ value_to([](auto, auto) constexpr { return U'$'; });
+constexpr auto inline_latex_char =
 	(dollar_escape | cnot('$', '\n'))
 	^ value_to([](auto&& v) constexpr -> char32_t { return as_char(v); });
-inline constexpr auto inline_latex_block =
-	(c('$') >> +inline_latex_char >> c('$'))
-	^ value_to([](auto, const auto& chars, auto) -> LatexBlock {
-		  return LatexBlock {
-			  .kind	   = LatexBlock::Kind::Inline,
-			  .content = u32chars_to_u8(chars),
-		  };
-	  });
-
-inline constexpr auto inline_text_chars = +cnot('*', '`', '[', '$', '\n');
-inline constexpr auto inline_text = inline_text_chars ^ value_to([](const auto& chars) -> Text {
-										return {.content = u32chars_to_u8(chars)};
+constexpr auto inline_latex_block = c('$') >> +inline_latex_char >> c('$')
+								  ^ value_to([](auto, const auto& chars, auto) -> LatexBlock {
+										return LatexBlock {
+											.kind	 = LatexBlock::Kind::Inline,
+											.content = u32chars_to_u8(chars),
+										};
 									});
 
-inline constexpr auto emphasis	  = (c('*') >> +cnot('*', '\n') >> c('*'))
-							   ^ value_to([](auto, const auto& chars, auto) -> Emphasis {
-									 return {.content = u32chars_to_u8(chars)};
-								 });
+constexpr auto inline_text_chars  = +cnot('*', '`', '[', '$', '\n');
+constexpr auto inline_text		  = inline_text_chars ^ value_to([](const auto& chars) -> Text {
+								 return {.content = u32chars_to_u8(chars)};
+									});
 
-inline constexpr auto strong_emphasis =
-	(repeat<2>(c('*')) >> +cnot('*', '\n') >> repeat<2>(c('*')))
+constexpr auto emphasis			  = c('*') >> +cnot('*', '\n') >> c('*')
+								  ^ value_to([](auto, const auto& chars, auto) -> Emphasis {
+							  return {.content = u32chars_to_u8(chars)};
+									});
+
+constexpr auto strong_emphasis =
+	repeat<2>(c('*')) >> +cnot('*', '\n') >> repeat<2>(c('*'))
 	^ value_to([](auto, auto, const auto& chars, auto, auto) -> StrongEmphasis {
 		  return {.content = u32chars_to_u8(chars)};
 	  });
 
-inline constexpr auto code_span = (c('`') >> *cnot('`', '\n') >> c('`'))
+//
+constexpr auto code_span		= c('`') >> *cnot('`', '\n') >> c('`')
 								^ value_to([](auto, const auto& chars, auto) -> CodeSpan {
-									  return {.content = u32chars_to_u8(chars)};
+							   return {.content = u32chars_to_u8(chars)};
 								  });
 
-inline constexpr auto link_label	   = (+cnot(']', '\n')) ^ value_to(join_chars);
-inline constexpr auto link_destination = (+cnot(')', '\n')) ^ value_to(join_chars);
-inline constexpr auto link =
-	(c('[') >> link_label >> c(']') >> c('(') >> link_destination >> c(')'))
-	^ value_to(
-		[](auto, const std::string& label, auto, auto, const std::string& destination,
-		   auto) -> Link {
-			return {
-				.label		 = label,
-				.destination = destination,
-			};
-		}
-	);
+constexpr auto link_label		= (+cnot(']', '\n')) ^ value_to(join_chars);
+constexpr auto link_destination = (+cnot(')', '\n')) ^ value_to(join_chars);
+constexpr auto link = c('[') >> link_label >> c(']') >> c('(') >> link_destination >> c(')')
+					^ value_to(
+						  [](auto, const std::string& label, auto, auto,
+							 const std::string& destination, auto) -> Link {
+							  return {
+								  .label	   = label,
+								  .destination = destination,
+							  };
+						  }
+					);
 
-inline constexpr auto inline_atom =
+constexpr auto inline_atom =
 	strong_emphasis | emphasis | code_span | link | inline_latex_block | inline_text;
-inline constexpr auto inline_document = +inline_atom;
+constexpr auto inline_document = +inline_atom;
 
 TEST_CASE("markdown rules are defined with pure combinators", "[markdown.heading]") {
 	auto state = aggregate(

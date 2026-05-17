@@ -8,9 +8,9 @@ end
 
 add_rules("mode.debug", "mode.release")
 
-option("build_examples")
+option("build_tests")
     set_default(false)
-    set_description("Whether to build examples.")
+    set_description("Whether to build tests.")
     set_showmenu(true)
 option_end()
 

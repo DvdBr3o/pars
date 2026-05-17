@@ -38,7 +38,9 @@ struct StrLit {
 	std::u8string lit;
 };
 
-struct Fn {};
+struct Fn {
+	// TODO:
+};
 
 struct ValIdent {
 	std::u8string ident;
