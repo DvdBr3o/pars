@@ -131,17 +131,17 @@ constexpr auto heading = []() constexpr {
 		   });
 };
 
-constexpr auto h1 = heading<1>();
-constexpr auto h2 = heading<2>();
-constexpr auto h3 = heading<3>();
-constexpr auto h4 = heading<4>();
-constexpr auto h5 = heading<5>();
-constexpr auto h6 = heading<6>();
+constexpr auto h1		 = heading<1>();
+constexpr auto h2		 = heading<2>();
+constexpr auto h3		 = heading<3>();
+constexpr auto h4		 = heading<4>();
+constexpr auto h5		 = heading<5>();
+constexpr auto h6		 = heading<6>();
 
-constexpr auto paragraph =
-	(line_text >> opt_newline) ^ value_to([](const std::string& text, auto&&) -> Paragraph {
-		return Paragraph {.text = text};
-	});
+constexpr auto paragraph = line_text >> opt_newline
+						 ^ value_to([](const std::string& text, auto&&) -> Paragraph {
+							   return Paragraph {.text = text};
+						   });
 
 constexpr auto unordered_list_marker =
 	(cset(U'-', U'+', U'*') >> +space)
