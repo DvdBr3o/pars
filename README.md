@@ -10,6 +10,31 @@
 2. Combinable
 3. Customizable
 
+## A Quick Example
+
+Parsing an HTTP `Authorization: Bearer <token>` header is a common production task in gateways,
+API servers, and CLI tools:
+
+```cpp
+struct BearerAuth {
+	std::string token;
+};
+
+constexpr auto token_char = cran('a', 'z') | cran('A', 'Z') | cran('0', '9') | cset('-', '_', '.');
+constexpr auto bearer_auth =
+	(cstr(U"Authorization:") >> *c(' ') >> cstr(U"Bearer") >> +c(' ') >> +token_char)
+	^ value_to([](auto&&, auto&&, auto&&, auto&&, const auto& token) {
+		  return BearerAuth {.token = u32chars_to_u8(token)};
+	  });
+
+auto st	 = TextParserState {u8"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9"};
+auto res = bearer_auth.match(st);
+assert(res.value().token == "eyJhbGciOiJIUzI1NiJ9");
+```
+
+This style scales naturally from “extract one header” to larger config, markdown, DSL, or source
+code parsers.
+
 ## How it works
 
 ### Primitives
