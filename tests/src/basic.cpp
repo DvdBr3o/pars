@@ -41,7 +41,7 @@ inline auto tag_invoke(to_string_t, SuiteTok tok) -> std::string {
 }
 
 struct CustomError {
-	int code;
+	int			code;
 
 	friend auto tag_invoke(to_string_t, const CustomError& error) -> std::string {
 		return std::format("custom error {}", error.code);
@@ -49,11 +49,11 @@ struct CustomError {
 };
 
 struct CustomResult {
-	bool		ok;
-	int			value;
-	CustomError error;
+	bool				  ok;
+	int					  value;
+	CustomError			  error;
 
-	constexpr explicit operator bool() const { return ok; }
+	constexpr explicit	  operator bool() const { return ok; }
 
 	friend constexpr auto tag_invoke(value_of_t, const CustomResult& result) -> int {
 		return result.value;
@@ -71,20 +71,20 @@ struct CustomResultRule {
 	constexpr auto match(auto&& state) const -> ResultType {
 		if (auto res = c('x').match(state))
 			return {
-				.ok		= true,
-				.value	= static_cast<int>(pars::value_of(std::move(res))),
-				.error	= {.code = 0},
+				.ok	   = true,
+				.value = static_cast<int>(pars::value_of(std::move(res))),
+				.error = {.code = 0},
 			};
 		return {
-			.ok		= false,
-			.value	= 0,
-			.error	= {.code = 7},
+			.ok	   = false,
+			.value = 0,
+			.error = {.code = 7},
 		};
 	}
 };
 
 inline constexpr CustomResultRule custom_result_rule {};
-inline constexpr DynamicRule custom_dynamic_rule = custom_result_rule;
+inline constexpr DynamicRule	  custom_dynamic_rule = custom_result_rule;
 
 static_assert(std::same_as<value_type_of_t<CustomResult>, int>);
 static_assert(std::same_as<error_type_of_t<CustomResult>, CustomError>);
@@ -297,7 +297,7 @@ TEST_CASE("token rules parse a python-like suite", "[token.rules]") {
 					>> tok(SuiteTok::Colon) >> tok(SuiteTok::Newline) >> tok(SuiteTok::Indent)
 					>> +tok(SuiteTok::Name) >> tok(SuiteTok::Newline) >> tok(SuiteTok::Dedent);
 
-	auto res = suite.match(state);
+	auto	   res	 = suite.match(state);
 
 	REQUIRE(res);
 	REQUIRE(query_token_cursor<SuiteTok>(state).peek() == SuiteTok::Eof);
