@@ -4,6 +4,9 @@
 
 ---
 
+> [!WARNING]
+> This repo does NOT sync with the latest implementation of pars. The latest version of pars is currently inlined into project [luna](https://github.com/DvdBr3o/luna) and will be versioned into this repo once it is functional complete and stable.
+
 ## Features
 
 1. Compile-time
