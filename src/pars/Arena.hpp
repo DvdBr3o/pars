@@ -1,152 +1,87 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
-#include <memory>
-#include <type_traits>
-#include <concepts>
-#include <vector>
-#include <string>
+#include <memory_resource>
+#include <new>
+#include "pars/Query.hpp"
 
-namespace pars::Arena {
-template<std::size_t size = 512>
-class Block {
+namespace pars {
+template<typename T>
+class Arena {
+public:
+	constexpr Arena(T* ptr) : _ptr(ptr) {}
+
+	constexpr Arena(const Arena&)				 = default;
+	constexpr Arena(Arena&&) noexcept			 = default;
+	constexpr Arena& operator=(const Arena&)	 = default;
+	constexpr Arena& operator=(Arena&&) noexcept = default;
+	constexpr ~Arena()							 = default;
+
+	constexpr explicit operator T&() & { return *_ptr; }
+
+	constexpr explicit operator T&&() && { return *_ptr; }
+
+	constexpr explicit operator const T&() const& { return *_ptr; }
+
+	constexpr auto	   operator*() -> T& { return *_ptr; }
+
+	constexpr auto	   operator*() const -> const T& { return *_ptr; }
+
+	constexpr auto	   operator->() -> T* { return _ptr; }
+
+	constexpr auto	   operator->() const -> const T* { return _ptr; }
+
+	//
+	inline friend constexpr auto operator==(const Arena& l, const Arena& r) -> bool {
+		return l._ptr == r._ptr || *l._ptr == *r._ptr;
+	}
+
+	template<typename H>
+	inline friend constexpr auto AbslHashValue(H h, const Arena& arena) {
+		return H::combine(std::move(h), *arena._ptr);
+	}
+
 private:
-	char				   _buffer[size] = {};
-	char*				   _index		 = _buffer;
-	std::unique_ptr<Block> _trailing	 = nullptr;
+	T* _ptr;
+};
+
+template<size_t BasicSize = 4096>
+class BasicArenaAllocator {
+public:
+	BasicArenaAllocator() : _arena(_buffer, BasicSize, std::pmr::new_delete_resource()) {}
 
 public:
 	template<typename T>
-	struct AllocRes {
-		T*	   obj;
-		Block* block;
-	};
+	auto allocate(size_t n = 1) & -> Arena<T> {
+		return reinterpret_cast<T*>(_arena.allocate(sizeof(T) * n));
+	}
 
-	friend class Pool;
-
-public:
-	Block() = default;
-
-public:
 	template<typename T, typename... Args>
-	auto alloc(Args&&... args) -> AllocRes<T> {
-		if (_buffer + size - _index >= sizeof(T)) {
-			auto* ptr = new (_index) T {std::forward<Args>(args)...};
-			_index += sizeof(T);
-			return {ptr, this};
-		} else {
-			_trailing = std::make_unique<Block>();
-			auto* ptr = new (_trailing->_index) T {std::forward<Args>(args)...};
-			_trailing->_index += sizeof(T);
-			return {ptr, _trailing.get()};
-		}
+	auto create(Args&&... args) & -> Arena<T> {
+		auto ptr = _arena.allocate(sizeof(T));
+		new (ptr) T {std::forward<Args>(args)...};
+		return reinterpret_cast<T*>(ptr);
 	}
 
 	template<typename T>
-	auto allocate(size_t n) -> AllocRes<T> {
-		const auto alloc_size = n * sizeof(T);
-		if (_buffer + size - _index >= alloc_size) {
-			auto* ptr = new (_index) char[alloc_size] {};
-			_index += alloc_size;
-			return {reinterpret_cast<T*>(ptr), this};
-		} else {
-			_trailing = std::make_unique<Block>();
-			auto* ptr = new (_trailing->_index) char[alloc_size] {};
-			_trailing->_index += alloc_size;
-			return {reinterpret_cast<T*>(ptr), _trailing.get()};
-		}
+		requires std::is_trivially_copyable_v<T>
+	auto cpy(T* t, size_t n = 1) & -> Arena<T> {
+		auto ptr = _arena.allocate(sizeof(T) * n);
+		std::memcpy(ptr, t, sizeof(T) * n);
+		return reinterpret_cast<T*>(ptr);
 	}
-};
 
-class Pool;
-
-template<typename T>
-struct Allocator {
-	using value_type = T;
-	using char_type	 = T;
-
-	Pool&						 pool;
-
-	auto						 allocate(size_t n) -> T*;
-
-	auto						 deallocate(T* p, size_t n) -> void;
-
-	inline friend constexpr auto operator==(const Allocator& lhs, const Allocator& rhs) {
-		return true;
-	}
-};
-
-template<typename T>
-using Vector = std::vector<T, Allocator<T>>;
-
-template<typename CharT>
-using BasicString = std::basic_string<CharT, std::char_traits<CharT>, Allocator<CharT>>;
-
-using String	  = BasicString<char>;
-
-class Pool {
 private:
-	std::unique_ptr<Block<>> _head;
-	Block<>*				 _block = _head.get();
-
-public:
-	using value_type = void;
-
-public:
-	template<typename T, typename... Args>
-		requires std::is_trivially_destructible_v<T>
-	auto alloc(Args&&... args) -> T* {
-		auto [ptr, block] = _block->alloc(std::forward<Args>(args)...);
-		_block			  = block;
-		return ptr;
-	}
-
-	template<typename T>
-	auto allocate(size_t n) -> T* {
-		auto [ptr, block] = _block->allocate<T>(n);
-		_block			  = block;
-		return static_cast<T*>(ptr);
-	}
-
-	void						 deallocate(void* p, size_t n) {}
-
-	inline friend constexpr auto operator==(const Pool& lhs, const Pool& rhs) { return true; }
-
-	template<typename T>
-	constexpr operator Allocator<T>() {
-		return {*this};
-	}
-
-	template<typename T, typename... Args>
-	auto vector(Args&&... args) -> Vector<T> {
-		return Vector<T> {std::forward<Args>(args)..., *this};
-	}
-
-	// template<typename T>
-	// auto make_vector(std::initializer_list<T> elems) -> Vector<T> {
-	// 	return Vector<T> {std::move(elems), *this};
-	// }
-
-	template<typename T, size_t N>
-	auto make_vector(const T (&elems)[N]) -> Vector<T> {
-		return Vector<T> {elems, elems + N, *this};
-	}
-
-	template<typename... Args>
-	auto string(Args&&... args) -> String {
-		return String {std::forward<Args>(args)..., *this};
-	}
+	char								_buffer[BasicSize] {};
+	std::pmr::monotonic_buffer_resource _arena;
 };
 
-template<typename T>
-auto Allocator<T>::allocate(size_t n) -> T* {
-	return pool.allocate<T>(n);
-}
+using ArenaAllocator		= BasicArenaAllocator<4096>;
+using ScratchArenaAllocator = BasicArenaAllocator<128>;
 
-template<typename T>
-auto Allocator<T>::deallocate(T* p, size_t n) -> void {
-	pool.deallocate(p, n);
-}
+template<size_t Size = 4096>
+struct ArenaTag : QueryTag<ArenaTag<Size>, BasicArenaAllocator<Size>> {};
 
-}  // namespace pars::Arena
+template<size_t Size = 4096>
+struct ArenaState : QueryState<ArenaTag<Size>> {};
+
+}  // namespace pars

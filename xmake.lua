@@ -22,7 +22,7 @@ add_requires("utfcpp")
 add_requires("fmt")
 
 target("pars")
-    set_languages("cxx20")
+    set_languages("cxxlatest")
     set_kind("static")
 
     add_packages("range-v3", {public = true})
