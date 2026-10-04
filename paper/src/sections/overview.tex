@@ -1,0 +1,106 @@
+\section{Overview}
+\label{sec:overview}
+
+A user writes a grammar as an ordinary C++ type.  The compiler lowers it,
+entirely at compile time, to a data-parallel scanner whose structure is fixed by
+the scan algebra $\SA$ (Figure~\ref{fig:framework}).  This section gives the intuition; the
+formalization follows in \S\ref{sec:model}.
+
+\input{figures/framework}
+
+\paragraph{The surface language.}
+The whole user input is one C++ type: rules are tag structs, rule bodies are
+type aliases, and there is no run-time grammar object.  Figure~\ref{fig:grammar}
+is a JSON fragment.
+
+\begin{figure}[t]
+\begin{lstlisting}
+struct json_grammar {
+  struct value {}; struct string {};
+  struct number {}; struct ws {};
+  using rules         = type_list<value, string,
+                                  number, ws>;
+  using lexical_rules = type_list<string, number, ws>;
+  using start = value;
+  template <class> struct def;
+};
+template <> struct json_grammar::def<
+    json_grammar::string> {
+  using type = seq<lit<'"'>,
+      star<alt<seq<lit<'\\'>, any>,
+               seq<notp<cls<'"','\\'>>, any>>>,
+      lit<'"'>>;
+};
+\end{lstlisting}
+\caption{A grammar is a type.  \code{lexical\_rules} marks the rules that mask;
+all other rules are classified as structural or recursive by the front end
+(automaton + FIRST/LAST + the bracket guard), never by pattern matching.
+The full seven-grammar suite ships in the artifact.}
+\label{fig:grammar}
+\end{figure}
+
+\begin{table}[t]
+\centering\small
+\caption{Surface constructs and their grammar meaning.}
+\label{tab:dsl}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Construct & Grammar meaning \\
+\midrule
+\code{lit<c>}, \code{cls<c...>}, \code{any} & terminal, byte class, wildcard \\
+\code{seq<>}, \code{alt<>} & concatenation, alternation \\
+\code{opt<>}, \code{star<>}, \code{plus<>} & Kleene operators \\
+\code{rule<T>} & nonterminal reference \\
+\code{notp<T>} & negated predicate (lookahead) \\
+\code{rules}, \code{start}, \code{def<T>} & rule set, start symbol, body \\
+\code{lexical\_rules} & mask these rules \\
+\code{fallback\_rules} & opt-out to a fallback backend \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{From a branch program to masked data flow.}
+Consider the scalar loop that masks JSON strings:
+\begin{lstlisting}
+in = esc = false;
+for (i = 0; i < n; ++i) {
+  c = data[i];
+  if (in) {
+    if (esc)              esc = false;
+    else if (c == '\\')   esc = true;
+    else if (c == '"')    in  = false;
+  } else {
+    if (c == '"')         in  = true;
+    else if (structural(c)) emit(i);
+  }
+}
+\end{lstlisting}
+Every condition is a predicate on the current byte and a bounded register.  The
+rewrite replaces each byte by the state transform it induces and the loop by a
+\emph{prefix scan} over the transformation monoid; a branch becomes a masked
+select.  For the 1-bit \texttt{in}-flag the transform is affine,
+$x'=(a\wedge x)\oplus b$, and its prefix is a single
+\textsf{prefix\_xor} over the quote mask once escaped quotes are removed.
+
+\paragraph{Masking from an automaton, not a shape.}
+We do not pattern-match rule syntax.  Each lexical rule is compiled to a DFA by
+Brzozowski derivatives, and a byte is masked iff the DFA transition it takes is
+one that \emph{consumes it as part of an in-progress token}.  This one rule
+subsumes prefix-escaped strings, doubled-quote strings, line and block comments,
+and multi-mode languages.  Specializations (affine, doubled, comment) are
+emitted only when an exhaustive check shows them equivalent to the automaton.
+
+\paragraph{Parsing as well-nested reduction.}
+For a well-nested (visibly pushdown) recursion, the stack is replaced by a
+depth group-scan plus a sort: depth is the prefix sum over open/close brackets,
+and matched pairs are adjacent tokens after a stable sort by depth.  This is
+\textsf{cuJSON}'s stack-free matching, derived from the grammar rather than
+special-cased.
+
+\paragraph{Boundary, kernels, chunking --- not transfer.}
+The framework owns the device boundary: \code{scan\_device} is zero-copy
+(input on device, results on device), the \code{scan\_host} adapter is the only
+place with bulk transfers, and \code{scan\_chunk} carries the prefix-monoid
+state and output offset so chunks can be pipelined.  This separation is what
+makes the three throughput tiers of \S\ref{sec:eval} meaningful: a compute
+roofline, an on-device number, and a host-boundary number.

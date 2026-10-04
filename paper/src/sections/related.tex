@@ -1,0 +1,38 @@
+\section{Related Work}
+\label{sec:related}
+
+The algebraic components of $\SA$ are classical.  Parallel prefix is
+Blelloch's scan~\cite{blelloch}, with the classic
+Ladner--Fischer~\cite{ladnerfischer} and Hillis--Steele~\cite{hillissteele}
+constructions and GPU scan/compaction primitives~\cite{sengupta}; that a finite
+automaton is a transformation monoid is
+textbook~\cite{eilenberg,hopcroftullman}, and regular expressions are decided by
+derivatives~\cite{brzozowski}; the scan lemma and promotion come from the
+Bird--Meertens theory of lists~\cite{birdlists,birddemoor,meertens}; the
+well-nested reduction is \textsf{cuJSON}'s stack-free
+matching~\cite{cujson}; the bracket/stack monoid is Levien's \emph{Stack
+Monoid}~\cite{stackmonoid}; parallel bracket matching / tree contraction is
+classical~\cite{baronvishkin,millerreif}; and well-nested recursion is precisely
+the visibly-pushdown class of Alur and Madhusudan~\cite{alur}.  Our stance that
+these are instances of one structured parallel pattern is in the tradition of
+algorithmic skeletons~\cite{cole} and of algebraic treatments of parsing
+(semiring parsing~\cite{goodman}).  We do not claim the algebra itself.
+
+Our claim is its \emph{systematization into a compiler}.  \textsf{simdjson}
+\cite{simdjson} and \textsf{simdcsv} \cite{simdcsv} hand-write the primitives
+for one format each; \textsf{cuJSON} \cite{cujson} and \textsf{GpJSON}
+\cite{gpjson} do so on the GPU; \textsf{Mison} \cite{mison},
+\textsf{Sparser} \cite{sparser} and \textsf{Pison} \cite{pison} optimize JSON
+ingestion in data systems.  None exposes a grammar-to-parallel-parser
+derivation, and none distinguishes compute parallelism from data movement as a
+compiler concern.  XML and YAML parsers such as \textsf{pugixml}
+\cite{pugixml} and \textsf{rapidyaml} remain optimized sequential parsers; to
+our knowledge no SIMD or GPU parser exists for TOML, XML, YAML or INI, which is
+exactly the setting where a generator has no hand-written baseline to match.
+On the scanner side, the classical generators \textsf{lex}~\cite{lex} and
+\textsf{re2c}~\cite{re2c} compile regular expressions to a table-driven DFA with
+longest-match semantics, and \textsf{Hyperscan}~\cite{hyperscan} vectorizes
+multi-pattern matching, but none exposes the transformation-monoid scan used
+here.  General-value parsing (CYK/Earley~\cite{earley}, or Valiant's reduction to
+Boolean matrix multiplication~\cite{valiant}) is parallelizable in theory but
+not competitive in practice, and we do not target it.

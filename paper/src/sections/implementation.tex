@@ -1,0 +1,76 @@
+\section{Implementation}
+\label{sec:impl}
+
+The compiler is a header-only C++ library; the CUDA backend is a single header.
+A grammar is a C++ type; all lowering happens at compile time, so the generated
+scanner is an ordinary templated kernel with no dispatch cost.
+
+\subsection{Front end: shape-free lowering}
+\label{sec:frontend}
+
+The front end (\code{include/pars/compile/}) reads only rule definitions:
+\begin{enumerate}
+  \item \textbf{Recursion analysis.} The rule reference graph is traversed with a
+    visited set to compute, per rule, whether it lies on a cycle and how many
+    direct self-references it has (cycle glue has none).
+  \item \textbf{Automaton.} Each lexical rule body is reified to a regular
+    expression in a fixed-capacity arena (no dynamic allocation, so it is
+    constant-evaluable by strict front ends such as \textsf{nvcc}) and compiled
+    to a DFA by Brzozowski derivatives.  States are canonical derivatives;
+    alternatives are normalized by ACI sorting and deduplication, and the
+    alphabet is the quotient of $\Sigma$ by membership in every character
+    predicate, keeping the DFA tiny even for dense complement predicates.
+  \item \textbf{Descriptors.} For each lexical rule we store a \emph{monoid
+    descriptor} (\S\ref{sec:backend}).  The unified mask predicate of
+    \S\ref{sec:when} decides whether the rule masks at all.
+  \item \textbf{Brackets.} A recursive rule is accepted as a well-nested anchor
+    only if its top-level definition has exactly the two literal endpoints,
+    distinct, with the recursion strictly inside (a conservative, sufficient
+    structural criterion); well-nestedness is additionally validated at run time.
+  \item \textbf{Diagnostics.} Unsupported recursion or unsupported \code{notp}
+    forms are a compile error unless the rule is declared in
+    \code{fallback\_rules}.
+\end{enumerate}
+
+\subsection{Monoid descriptors}
+\label{sec:descriptor}
+
+A descriptor is a small structural value (an NTTP) of one of these kinds:
+\begin{itemize}
+  \item \textbf{affine}: a delimiter set plus an optional prefix-escape byte
+    (executed as $x'=(a\wedge x)\oplus b$);
+  \item \textbf{doubled}: a delimiter set (parity on valid input);
+  \item \textbf{comment}: a start set and a newline reset;
+  \item \textbf{table}: a $\le 8\times 8$ transition table with a
+    per-transition mask bit.
+\end{itemize}
+The kind is read off the DFA; importantly, the execution of \emph{every} kind is
+defined by the same automaton table, so a specialization is a performance choice,
+not a semantic one.
+
+\subsection{Backends}
+\label{sec:backend}
+
+\paragraph{CPU.}
+The CPU backend executes descriptors as a per-byte state transform; the running
+state is the prefix product (\Rfour).
+
+\paragraph{CUDA.}
+The GPU backend packs all descriptors into one 64-bit transform: each descriptor
+owns a contiguous range of $4$-bit slots, and we precompute a $256$-entry
+per-byte transform table (absolute slot encoding).  Per $32$-byte word we compose
+the word transform (each thread), run a \code{thrust} inclusive scan of the
+packed transforms, and replay to recover the per-byte state and emit the
+per-transition mask.  The scan slot width is \code{total\_states}, and the tables
+are staged into shared memory; a compile-time gate rejects
+$\code{total\_states}>16$.
+
+\subsection{Schedule}
+\label{sec:schedule}
+
+The plan separates compute from movement.  \code{scan\_device} is zero-copy
+(device input, device results; only scalar count read-back); \code{scan\_host}
+is the only adapter with bulk transfers (pinned, asynchronous), and
+\code{scan\_chunk} carries the packed prefix-monoid element and the compaction
+offset so a caller can double-buffer chunks across two streams.  The bracket
+pairing uses a depth radix sort (\Rsix) rather than a comparison sort.

@@ -1,0 +1,22 @@
+[project]
+name = "pars-paper"
+version = "0.0.0"
+description = "Figure generation for the pars paper"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.7",
+    "seaborn>=0.13",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scienceplots>=2.1",
+]
+
+# This is a scripts-only project (no importable package to build).
+[tool.uv]
+package = false
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["plots"]
+reportMissingImports = "warning"

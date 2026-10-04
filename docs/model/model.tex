@@ -1,0 +1,256 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,framerule=0.2pt,
+        columns=fullflexible,keepspaces=true}
+
+\title{The Scan Algebra $\mathfrak{S}$: A Unified Derivation from Grammars to Parallel Parsers}
+\author{pars}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We formalize the parallelism behind cuJSON, simdjson and simdcsv as a single
+the scan algebra $\mathfrak{S}$: a small algebra of primitives (classification, monoid scan, masked
+select, compaction, well-nested reduction, associative reduction) together with
+a rewrite system that turns a naive branch program into branchless masked data
+flow.  We show that a grammar lowers to $\mathfrak{S}$ exactly when its rule bodies are
+regular and its recursion is well-nested or associative, that cuJSON/simdjson/
+simdcsv are three instances of $\mathfrak{S}$, and that the resulting pipelines are
+generated without any format-specific code.
+\end{abstract}
+
+\section{Naive branch programs}
+A \emph{naive branch program} (NBP) operates positionally on a byte stream using
+only: \texttt{if/else} whose conditions are the current byte class and a bounded
+register state; loops over positions; bounded registers; a stack; and
+\texttt{emit}.  The whole of cuJSON's tokenizer is the NBP
+\begin{lstlisting}
+in_string = escaped = false;
+for (i = 0; i < n; ++i) { c = data[i];
+  if (in_string) { if (escaped) escaped=false;
+                   else if (c=='\\') escaped=true;
+                   else if (c=='"') in_string=false; }
+  else { if (c=='"') in_string=true;
+         else if (is_structural(c)) { emit_external(i);
+              if (is_bracket(c)) emit_bracket(i); } } }
+\end{lstlisting}
+and its parser is the stack loop
+\begin{lstlisting}
+for (tok in bracket_indices)
+  if (is_open(data[tok])) push(tok);
+  else { j = pop(); pair[j] = tok; }
+\end{lstlisting}
+
+\section{The rewrite system}
+Let $\mathrm{class}:\Sigma\to C$ be derived from the terminal sets.
+
+\begin{description}
+\item[R1 (classification)] $c=\ell\mapsto M_\ell$; $c\in S\mapsto\bigvee_{s\in S}M_s$.
+\item[R2 (state $\to$ mask)] a $k$-bit register becomes $k$ bit masks.
+\item[R3 (branch $\to$ select)]
+$\texttt{if}(c)\,x{=}f(x)\,\texttt{else}\,x{=}g(x)\;\rightsquigarrow\;
+x=(c\wedge f(x))\vee(\neg c\wedge g(x))$.
+\item[R4 (scan)] the recurrence $s_{i+1}=T_{\mathrm{class}_i}(s_i)$ makes each byte
+induce a transform $\tau_i:S\to S$, so
+\[
+s_i=(\tau_{i-1}\circ\cdots\circ\tau_0)(s_0),
+\]
+a prefix product in the transformation monoid $(S\to S,\circ)$, computed by a
+parallel scan.  For $S=\{0,1\}$ the transform is affine,
+\[
+\tau(x)=(a\wedge x)\oplus b,\qquad
+(a_1,b_1)\circ(a_2,b_2)=(a_1\wedge a_2,\,(b_1\wedge a_2)\oplus b_2),
+\]
+whose prefix is simdjson's \texttt{prefix\_xor} and cuJSON's escape scan.
+\item[R5 (compaction)] $\texttt{for}\,i\,\texttt{if}\,M[i]\,\texttt{out.push}(i)
+\rightsquigarrow \mathrm{popcount}+\mathrm{exclusive\_scan}+\mathrm{scatter}$.
+\item[R6 (well-nested)] for a well-nested bracket language the stack content is
+determined by the depth $\delta_i$, the prefix sum of $(+1,-1)$ (a scan over the
+group $\mathbb Z$); stable-sort by depth and pair adjacent tokens, then validate
+types.  This is cuJSON's \texttt{depth}$\to$\texttt{sort}$\to$\texttt{validate}.
+\item[R7 (associative)] a single self-recursive rule with an associative operator
+lowers to a monoid reduction.
+\end{description}
+
+\begin{definition}[$\mathfrak{S}$-reducibility]
+A grammar $G$ is \emph{$\mathfrak{S}$-reducible} iff
+(i) every non-recursive rule body is a regular expression over the terminal
+alphabet, and
+(ii) every recursive strongly connected component of the rule graph is either
+\emph{visibly pushdown} (each recursive call is guarded by a terminal
+call/return pair) or a single self-recursive rule whose operator is associative.
+Condition (i) yields R1--R5; condition (ii) yields R6 or R7.
+\end{definition}
+
+\section{Three SOTA parsers are instances of $\mathfrak{S}$}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Parser & $\mathfrak{S}$ decomposition\\
+\midrule
+simdjson stage1 & R1 + R4(\texttt{prefix\_xor},\texttt{escaped\_scan}) + R3 + R5\\
+cuJSON tokenize & R1 + R4 ($\texttt{\_\_vcmpeq4}$) + R3 + R5\\
+cuJSON parser & R6 (depth $=$ R4 over $\mathbb Z$; pair $=$ sort by depth)\\
+simdcsv & R1 + R4 (quote parity) + R3 + R5\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Compilation (shape-free)}
+\texttt{make\_scan\_plan}$\langle G\rangle$ uses no syntactic shape patterns.
+\begin{enumerate}
+\item \textbf{Lexical rules $\to$ DFA.}  Reify the rule body to a regular
+expression and build a DFA by Brzozowski derivatives; states are canonical
+derivatives, $\mathsf{alt}$ is normalized by ACI sorting/dedup, and the alphabet
+is the quotient of bytes by membership in every character predicate (so a dense
+complement predicate still yields a tiny alphabet).
+\item \textbf{Masks from the automaton.}  A byte is masked iff the DFA state
+before it is non-start and can reach accept through a path consuming at least
+one structural byte.  One definition covers prefix-escape, no-escape, doubled
+delimiters and line comments.  The \emph{scheduled} delimiter/escape form is read
+off the DFA: a unique start byte $D$; $\mathsf{der}(S_1,D)$ with
+$\mathsf{der}(S_2,D)=S_1$ gives a doubled delimiter, an absorbing return through
+some $E$ gives a prefix escape, otherwise no escape.
+\item \textbf{Brackets from FIRST/LAST.}  For a recursive SCC whose FIRST and
+LAST terminal sets are single distinct characters, emit an R6 bracket pair ---
+the visibly-pushdown guard, not a syntactic position.
+\item \textbf{Punctuation} is the standalone terminals of non-lexical rules.
+\item \textbf{Support.}  Every recursive rule must be R6-guarded; else diagnose.
+\end{enumerate}
+The lexical/syntactic split is the standard BNF annotation \texttt{lexical\_rules}
+(inferred as non-recursive rules when absent).
+
+\paragraph{Execution semantics (P1).}
+The plan carries, per lexical masking rule, a monoid descriptor (still an NTTP):
+\texttt{affine} (delimiter set $\times$ optional prefix escape, executed as
+$x'{=}(a\wedge x)\oplus b$), \texttt{doubled}, \texttt{comment}
+(start set $+$ newline reset), or \texttt{table} (a $\le 8\times 8$ transition
+table).  Execution is a per-byte state transform whose prefix product is the
+running state (R4).  The mask is \emph{not} a per-state predicate but the
+per-transition bit ``this byte is consumed by an in-progress token'', which is
+exact for doubled delimiters (a per-state inside bit is off by one at the
+closing quote).  Factorization is read off the DFA and validated by differential
+random testing.  The decisive coverage witness is a block comment
+$/*\cdots*/$ (multi-character, two distinct delimiters), which is not one of the
+legacy templates and runs on the \texttt{table} path; the GPU consuming the same
+table (P1c) and a formal specialization-equivalence proof (P1d) remain.
+
+\paragraph{Soundness gates.}
+The unified mask predicate is executable: a lexical rule becomes a mode/comment
+only if some non-start DFA state can reach accept through a structural byte.
+General \texttt{notp} is rejected (only the one-byte complement form
+$\texttt{seq}{<}\texttt{notp}{<}\texttt{cls}{<}S{>}{>},\texttt{any}{>}$ is
+regular).  A recursive rule is accepted as an R6 anchor only if it satisfies the
+conservative structural criterion ``the top-level sequence has exactly the two
+literal endpoints, distinct, with the recursion strictly inside'', which rejects
+ill-founded patterns such as $a \to (\,a\,)\,;$; well-nestedness is additionally
+validated at run time.  \texttt{require\_supported} makes any unsupported rule a
+compile error unless it is listed in \texttt{fallback\_rules}.
+
+\section{Implementation and results}
+The framework contains no format-specific code; grammars are declared on the
+bench side only.  Throughput on 67.1\,MB payloads (RTX 4060 Laptop, CUDA 13.4):
+\begin{center}
+\begin{tabular}{@{}llr@{}}
+\toprule
+Format & Implementation & GB/s\\
+\midrule
+JSON & pars $\mathfrak{S}$ + CUDA & 0.98--1.23\\
+JSON & cuJSON (hand-written CUDA) & $\sim$0.96--1.1\\
+JSON & simdjson (CPU ondemand) & 1.49\\
+CSV  & pars $\mathfrak{S}$ + CUDA & 2.15\\
+CSV  & simdcsv (CPU AVX2) & 9.37\\
+\bottomrule
+\end{tabular}
+\end{center}
+JSON matches cuJSON's order of magnitude.  CSV trails the hand-written AVX2
+parser, mainly because the host-to-device copy is not amortized at 67\,MB and
+CSV has low structural density.  Our implementation also corrects a real bug in
+the adjacency-based doubled-quote detection (it under-counts); parity toggling
+matches the naive reference ($8{,}567{,}094$ separators).
+
+\section{Cost model and the CSV anomaly}
+The primitives above characterize \emph{which computations} are data-parallel;
+they do not by themselves yield end-to-end throughput.  Make the schedule part of
+the model.  For an $n$-byte input producing $k$ structural tokens,
+\[
+T \;=\; T_{\mathrm{move\text{-}in}}(n) \;+\; T_{\mathrm{compute}}(n,k)
+\;+\; T_{\mathrm{move\text{-}out}}(k) \;+\; T_{\mathrm{intermediate}} .
+\]
+\begin{theorem}[Movement bound]
+R1--R7 give $T_{\mathrm{compute}}(n,k)=O(n\,\mathrm{polylog}\,n / \mathrm{BW}_{\mathrm{gpu}})$
+with $O(\log n)$ depth, independent of $T_{\mathrm{move}}$.  Hence end-to-end
+throughput $n/T$ is governed by $\max(T_{\mathrm{compute}},T_{\mathrm{move}})$; if
+primitives materialize $\Theta(n)$ intermediates and results are copied to the
+host, $T_{\mathrm{move}}$ dominates and the parallelism of $\mathfrak{S}$ is unobservable.
+\end{theorem}
+
+\paragraph{Measured attribution (67.1\,MB, RTX 4060 Laptop).}
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Configuration & JSON (GB/s) & CSV (GB/s)\\
+\midrule
+kernels only (device-resident) & 62.5 & 71.6\\
+$+$ H2D input copy & 3.81 & 6.61\\
+$+$ D2H result copy-back (structural only) & 1.78 & 3.91\\
+\bottomrule
+\end{tabular}
+\end{center}
+$T_{\mathrm{compute}}$ is $60$--$70$\,GB/s; the end-to-end number is $1$--$3$\,GB/s.
+\texttt{nsys} attributes $63.7\%$ of memory-op time to D2H (full structural and
+pair arrays) and $35.1\%$ to H2D (pageable $7.9$\,GB/s; pinned $12.4$\,GB/s).
+CSV exposes this sharply: its structural density is low ($6/47\approx13\%$) and it
+has no nesting, so $T_{\mathrm{compute}}$ is nearly free and the fixed
+$T_{\mathrm{move}}$ is the entire cost.  This is \emph{not} an algorithmic loss;
+it is a placement/materialization loss.  Consequently $\mathfrak{S}$ is extended with a
+schedule pass (placement, fusion, streaming, and an explicit observable
+boundary), and throughput claims must distinguish device-resident
+$T_{\mathrm{compute}}$ from end-to-end $n/T$.
+
+\section{Related work and positioning}
+The algebraic components of $\mathfrak{S}$ are classical: transformation monoids and
+parallel prefix are Blelloch's scan; automata-as-monoids is textbook; the
+well-nested reduction is cuJSON (ASPLOS'26); the bracket/stack monoid is Levien's
+\emph{Stack Monoid} (2020); well-nested recursion is precisely visibly pushdown
+(Alur--Madhusudan, STOC'04).  Our claim is therefore \emph{not} the algebra but
+its \emph{systematization and compilation}: a mechanical derivation
+\textsf{grammar}$\to$\textsf{primitives}$\to$\textsf{schedule}, with the
+compute/movement distinction made explicit.  This compiler view is absent from
+the prior systems (simdjson, simdcsv, cuJSON, GpJSON, Mison, Sparser, Pison).
+
+\section{Boundary}
+$\mathfrak{S}$ covers grammars with regular rule bodies and well-nested or associative
+recursion.  Unbounded lookahead and non-well-nested recursion are outside $\mathfrak{S}$ and
+must be declared as fallbacks; stage-2 semantic parsing is sequential/on-demand
+and is likewise outside $\mathfrak{S}$.
+
+\begin{thebibliography}{9}
+\bibitem{blelloch} G.~E. Blelloch. \emph{Prefix sums and their applications}.
+  Technical Report CMU-CS-90-190, 1990.
+\bibitem{simdjson} G.~Langdale and D.~Lemire. Parsing gigabytes of JSON per
+  second. \emph{VLDB Journal}, 2019.
+\bibitem{cujson} A.~Vedadi Gargary, S.~Safari Loaliyan, Z.~Zhao. cuJSON: A Highly
+  Parallel JSON Parser for GPUs. \emph{ASPLOS}, 2026.
+\bibitem{simdcsv} G.~Langdale. simdcsv, 2019.
+\bibitem{gpjson} GpJSON: GPU-accelerated JSON parsing. \emph{VLDB}, 2025.
+\bibitem{mison} L.~Li et al. Mison: A Fast JSON Parser for Data Analytics.
+  \emph{VLDB}, 2017.
+\bibitem{sparser} S.~Palkar et al. Filter Before You Parse: Faster Analytics on
+  Raw Data. \emph{VLDB}, 2018.
+\bibitem{pison} L.~Li et al. Pison: A Parallel JSON Parser for Many-core.
+\bibitem{alur} R.~Alur and P.~Madhusudan. Visibly Pushdown Languages.
+  \emph{STOC}, 2004.
+\bibitem{stackmonoid} R.~Levien. The Stack Monoid, 2020.
+\end{thebibliography}
+
+\end{document}

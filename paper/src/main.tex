@@ -1,0 +1,107 @@
+% PLDI submission skeleton (ACM acmart, sigplan format).
+%
+% Build:  ./build.sh           (uses tectonic, which fetches acmart automatically)
+% or:     latexmk -pdf main.tex (requires a TeX Live with acmart)
+%
+% PLDI uses the ACM `acmart` class in `sigplan` format with anonymous review.
+\documentclass[sigplan,10pt,review,anonymous]{acmart}
+% \documentclass[sigplan,10pt,review]{acmart}
+
+\settopmatter{printfolios=true}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\usepackage{amsmath,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+% Include a generated figure if present, else a placeholder box.
+\newcommand{\paperfig}[2]{%
+  \IfFileExists{figures/#1.pdf}%
+    {\includegraphics[width=\linewidth]{figures/#1.pdf}}%
+    {\fbox{\parbox[c][2.6cm][c]{0.92\linewidth}{\centering #2\\[2pt]%
+     \footnotesize(run \texttt{paper/plots/make\_figures.py})}}}}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{subcaption}
+\usepackage{fontspec}
+% Code font: Fira Code, vendored under src/fonts for a reproducible build.
+% Ligatures are disabled so \texttt{} and listings stay literal.
+\setmonofont{FiraCode-Regular}[
+  Path = fonts/,
+  BoldFont = FiraCode-Bold,
+  Scale = 0.92,
+  Ligatures = NoCommon,
+  RawFeature = {-liga,-calt},
+]
+\usepackage{listings}
+\definecolor{codebg}{RGB}{247,247,249}
+\definecolor{codekw}{RGB}{30,90,160}
+\definecolor{codetype}{RGB}{120,60,150}
+\definecolor{codestr}{RGB}{160,70,40}
+\definecolor{codecom}{RGB}{110,120,110}
+\definecolor{coderule}{RGB}{215,215,222}
+\lstdefinestyle{pars}{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{codekw}\bfseries,
+  keywordstyle=[2]\color{codetype},
+  commentstyle=\color{codecom}\itshape,
+  stringstyle=\color{codestr},
+  columns=fullflexible, keepspaces=true, breaklines=true, tabsize=2,
+  backgroundcolor=\color{codebg},
+  frame=single, framerule=0.3pt, framesep=3pt, rulecolor=\color{coderule},
+  aboveskip=6pt, belowskip=3pt, xleftmargin=3pt, framexleftmargin=3pt,
+  showstringspaces=false,
+  morekeywords={struct,using,template,class,typename,constexpr,auto},
+  morekeywords={[2]type_list,seq,alt,opt,star,plus,lit,cls,any,rule,notp,
+                lexical_rules,fallback_rules,rules,start,def},
+}
+\lstset{style=pars,language=C++}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+
+% Shorthands
+\newcommand{\SA}{\mathfrak{S}}
+\newcommand{\NBP}{\textsf{NBP}}
+\newcommand{\Rone}{R1}
+\newcommand{\Rtwo}{R2}
+\newcommand{\Rthree}{R3}
+\newcommand{\Rfour}{R4}
+\newcommand{\Rfive}{R5}
+\newcommand{\Rsix}{R6}
+\newcommand{\Rseven}{R7}
+\newcommand{\shapes}{\mathsf{shape}}
+\newcommand{\affine}{\mathit{affine}}
+\newcommand{\dyck}{\mathit{dyck}}
+\newcommand{\tab}{\mathit{table}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{Pars: Compiling Grammars to Data-Parallel Parsers}
+
+\author{Junze Dai}
+\author{Xianwei Zhang}
+\affiliation{
+    \institution{Sun Yat-Sen University} 
+    \country{China}
+}
+\email{dvdbr3o@qq.com}
+
+\begin{document}
+
+\input{sections/abstract}
+\maketitle
+
+\input{sections/intro}
+\input{sections/overview}
+\input{sections/model}
+\input{sections/implementation}
+\input{sections/evaluation}
+\input{sections/related}
+\input{sections/conclusion}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}

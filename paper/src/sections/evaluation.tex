@@ -1,0 +1,160 @@
+\section{Evaluation}
+\label{sec:eval}
+
+\paragraph{Setup.}
+All measurements are on an Intel i9-13980HX with an NVIDIA RTX 4060 Laptop GPU
+(\code{sm\_89}, CUDA 13.4).  We report three throughput tiers:
+\begin{itemize}
+  \item \textbf{N1a} (\emph{stage-1, device-resident}): input is uploaded once,
+        the scanner runs with results left in device memory; this is the
+        compute roofline of the generated kernels.
+  \item \textbf{N1b}: N1a plus bracket pairing (\Rsix).
+  \item \textbf{N3}: the host boundary (\code{scan\_host}, pinned + async);
+        \textbf{N3c} is the same boundary with chunked double-buffered overlap
+        (the packed prefix-scan carry is threaded across chunks).
+\end{itemize}
+The tiers are intervals on the algebra's R1--R6 axis: R1 classify,
+R2$\cdot$R4 mask+state scan, R3$\cdot$R5 compact, and R6 bracket pairing
+(\S\ref{sec:model}).  N1a $=$ R1--R5 and N1b $=$ R1--R6 are device-resident;
+N3 $=$ $T_{\mathrm{in}}+$R1--R6$+T_{\mathrm{out}}$ and N3c its chunked form are
+at the host boundary.  All of them are \emph{structural}: they stop at R6 and
+return the same structural-index-plus-bracket-partners representation as
+\textsf{cuJSON}'s Tokenize$+$Parser and \textsf{simdcsv}.  Value
+materialisation and queries are a user layer \emph{outside} R1--R6; we measure
+it separately (Fig.~\ref{fig:parse}).
+Inputs are generated per format from 8\,MB to 512\,MB (powers of two).  The
+device-resident whole-buffer path is memory-limited on an 8\,GB laptop GPU (a
+1\,GB JSON input needs $\sim$8.5\,GB of buffers), so we cap the device-resident
+scales at 512\,MB; the chunked path (N3c) uses $O(\text{chunk})$ extra memory and
+is the route \textsf{cuJSON} takes for its 1\,GB datasets~\cite{cujson}.
+For each configuration we run $N{=}3$ repetitions.  Scaling curves report the
+\emph{mean} throughput (the trend was stable, so dispersion is not shown there);
+the SOTA comparison shows the median with min--max whiskers so run-to-run
+variation is visible.  We compare against the strongest available implementation
+of each format (Table~\ref{tab:sota}); the only formats with a SIMD/GPU parser
+are JSON (\textsf{simdjson}, \textsf{cuJSON}) and CSV (\textsf{simdcsv}).  XML is
+a stage-1 scanner and C-like uses a \textsf{flex}-generated lexer as its baseline.
+
+\begin{table}[t]
+\centering\small
+\caption{Domain SOTA availability and the output each baseline produces.
+TOML, XML, YAML and INI have \emph{no} SIMD/CUDA parser; we use the best
+optimized CPU parser.  $^\star$Baselines producing the same output as pars
+(a structural index / token stream) and hence like-for-like; the others build a
+full DOM (or key/value map) and so perform strictly more work.}
+\label{tab:sota}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Format & SIMD/CUDA SOTA & Baseline (output) & N1a (GB/s) \\
+\midrule
+JSON & simdjson, cuJSON & simdjson (DOM), cuJSON$^\star$ & 19.9 \\
+CSV  & simdcsv           & simdcsv (index)$^\star$ & 37.9 \\
+TOML & (none)            & toml++ (DOM)          & 16.3 \\
+INI  & (none)            & inih (map)            & 23.3 \\
+XML  & (none)            & pugixml (DOM)         & 18.3 \\
+C-like & (none)          & flex (tokens)$^\star$ & 18.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Scaling.}
+Figure~\ref{fig:scaling} shows throughput versus input size.  The
+device-resident numbers are stable across scales.  The host-boundary chunked
+number for CSV rises as fixed launch overhead is amortized, then plateaus near
+the PCIe bound: the host boundary moves $1.51n$ bytes (input in, structural
+index out), giving a ceiling of $\sim$8\,GB/s, below
+\textsf{simdcsv}'s $\sim$10\,GB/s CPU-DRAM roofline.  The GPU's compute
+advantage therefore only materializes device-resident (N1a).
+
+\begin{figure*}[t]
+\centering
+\paperfig{fig_scaling}{Throughput vs input size}
+\caption{Throughput vs.\ input size (log--log axes; mean of $N$ runs).  Device
+stage-1 peaks at L2-sized inputs and then declines (memory-bandwidth bound).
+The chunked host path rises as fixed costs amortize and then plateaus at the
+PCIe host-boundary limit ($1.51n$ bytes moved); for CSV it stays below
+\textsf{simdcsv}, which is DRAM-bound on the CPU.}
+\label{fig:scaling}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\paperfig{fig_stages}{Per-stage GPU time}
+\caption{Per-stage GPU time on the R1--R6 axis (512\,MB).  The mask$+$scan stage
+(R2$\cdot$R4) dominates where the descriptor scan is generic
+(multi-mode/table); bracket pairing (R6) dominates bracket-heavy JSON.}
+\label{fig:stages}
+\end{figure}
+
+\paragraph{End-to-end parse, matched per format.}
+The comparison above is scoped to R1--R6, so Figure~\ref{fig:parse} matches each
+format at the interval its baseline actually covers.  For TOML, XML and INI we
+add a host post-R6 layer on the same hook: \code{replay} drives a user parser
+that decodes values ($M$) and builds a map or tag tree ($D$), all format
+specific and living outside \code{include/}; we validate that the resulting
+counts match the baselines exactly (sections, entries, elements, attributes).
+Both sides then perform a \emph{full parse} and pars is ahead (up to
+$20\times$ on TOML) or level.  For JSON the baseline is \textsf{cuJSON}, a GPU
+parser whose output is a \emph{structural index} (R1--R6), not a DOM; we
+therefore compare at that interval: pars N3c ($T_{\mathrm{in}}+$R1--R6$+T_{\mathrm{out}}$)
+against \textsf{cuJSON}'s standard-JSON total, \emph{both including D2H} (the
+publicly printed \textsf{cuJSON} total omits D2H; we add it back to $1.2$\,GB/s
+at 512\,MB).  At the equal interval pars is ahead; \textsf{cuJSON}'s GPU
+tokenizer/parser is otherwise the strongest JSON competitor.
+
+\begin{figure}[t]
+\centering
+\paperfig{fig_parse}{End-to-end comparison, matched per format}
+\caption{End-to-end comparison at 512\,MB, matched per format (log scale).
+JSON is compared at the \emph{structural} interval (pars N3c $=$
+$T_{\mathrm{in}}+$R1--R6$+T_{\mathrm{out}}$ vs \textsf{cuJSON}, both including
+D2H); TOML/INI/XML are \emph{full parses} (pars $=$ GPU R1--R6 $+$ host
+$M{+}D$ vs the DOM parser of each format).}
+\label{fig:parse}
+\end{figure}
+
+\paragraph{SOTA comparison and fairness.}
+Figure~\ref{fig:sota} compares the generated stage-1 scanner (N1a) with each
+format's baseline at 512\,MB.  The comparison is \emph{not} end-to-end
+equivalent: pars returns a structural index (positions of delimiters, quotes and
+brackets), whereas \textsf{simdjson}, \textsf{toml++}, \textsf{pugixml} and
+\textsf{inih} additionally materialize a DOM or key/value map.  We therefore
+report stage-1 throughput as \emph{headroom} for the data-parallel scan, not as
+a full-parse speedup, and separate out the like-for-like baselines
+($^\star$ in Table~\ref{tab:sota}): \textsf{simdcsv} computes exactly the same
+structural index as pars CSV, and \textsf{flex} is a pure tokenizer.
+On these the comparison is apples-to-apples: for CSV, N1a is $\sim$3.7$\times$
+\textsf{simdcsv}, while the chunked host boundary N3c is only $\sim$0.8$\times$,
+since it must move $1.51n$ bytes across PCIe whereas \textsf{simdcsv} streams
+from CPU DRAM.  The large gaps on TOML/INI/XML reflect the extra DOM-building
+work those baselines perform; they bound the scanning cost rather than
+demonstrate an end-to-end win; the end-to-end parse of Fig.~\ref{fig:parse}
+closes the gap directly.  For JSON we additionally include \textsf{cuJSON}, the
+GPU baseline, at
+the structural level (Fig.~\ref{fig:scaling}): it computes the same R1--R6
+output and its published total includes transport, and pars remains ahead.
+
+\begin{figure}[t]
+\centering
+\paperfig{fig_sota}{Stage-1 vs SOTA}
+\caption{Device stage-1 vs.\ chunked host path vs.\ the strongest implementation
+of each format at 512\,MB (log scale, min--max whiskers over repeats).  pars
+(and \textsf{simdcsv}, \textsf{flex}) return a structural or token index;
+\textsf{simdjson}, \textsf{toml++}, \textsf{pugixml} and \textsf{inih} build a
+full DOM, so those bars bound the scanning cost rather than an end-to-end
+comparison.}
+\label{fig:sota}
+\end{figure}
+
+\paragraph{Correctness.}
+Every generated scanner is validated against a CPU implementation on the full
+input and on random adversarial inputs (unterminated strings, doubled quotes,
+star runs in block comments, comments to EOF).  All four validated formats pass
+byte-for-byte on both.
+
+\paragraph{XML and YAML.}
+XML is currently a \emph{stage-1} scanner ($^\dagger$): it masks attribute
+values and derives the structural set $\{<,>,/,=,?,!\}$, but does not model tag
+nesting; full XML needs the visibly-pushdown call/return extension for named
+tags.  YAML needs an indentation primitive (an all-nearest-smaller-value stack);
+it is not supported yet.  Both are natural next milestones.

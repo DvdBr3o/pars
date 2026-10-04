@@ -1,0 +1,62 @@
+\section{Introduction}
+\label{sec:intro}
+
+Parsing has traditionally been treated as an inherently sequential problem: a
+recursive-descent or LR parser consumes bytes left to right, and its control
+flow (a stack, lookahead, backtracking) defeats vectorization.  Yet modern
+parsers do run fast.  \textsf{simdjson}~\cite{simdjson} scans JSON at gigabytes
+per second on a CPU using bit-parallel masks and a prefix scan;
+\textsf{cuJSON}~\cite{cujson} runs the same idea on a GPU; \textsf{simdcsv}
+does the analogous thing for CSV~\cite{simdcsv}.  The literature, however,
+describes these systems as collections of format-specific tricks.  This makes
+two questions hard:
+\begin{enumerate}
+  \item \textbf{Why} do the tricks work, and what is the space of grammars to
+        which they apply?
+  \item \textbf{How} does one obtain such a parser for a \emph{new} grammar,
+        without re-deriving the tricks by hand?
+\end{enumerate}
+
+This paper answers both by exhibiting a single algebra, the \emph{scan algebra} $\SA$, and
+a compiler built on it.  The key idea is to view fast parsing as
+\emph{branch masking}: the branchy scalar program that a grammar suggests is
+rewritten into branchless masked data flow.  Concretely, a byte-level
+recurrence
+\[
+  s_{i+1} = T_{c_i}(s_i)
+\]
+(where $c_i$ is the class of byte $i$) induces, for every byte, a transform
+$\tau_i : S \to S$; the running state is therefore the \emph{prefix product}
+$\tau_{i-1}\circ\cdots\circ\tau_0$ in the transformation monoid $(S\to S,\circ)$
+--- a parallel scan.  For $S=\{0,1\}$ this is the affine recurrence
+$x' = (a\wedge x)\oplus b$ whose prefix is exactly
+\textsf{simdjson}'s \textsf{prefix\_xor} and \textsf{cuJSON}'s escape scan.
+Filtering tokens is a stream compaction; the parser stack, for a well-nested
+language, is a depth group-scan plus a sort.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item \textbf{Scan algebra $\SA$} (\S\ref{sec:model}): a small algebra of primitives
+        (classification, monoid scan, masked select, compaction, well-nested
+        reduction, associative reduction) and a rewrite system that turns a
+        naive branch program into branchless data flow.  We characterize the
+        grammars to which the rewrite applies (regular rule bodies plus
+        visibly-pushdown or associative recursion) and give a cost model that
+        separates compute parallelism from data movement.
+  \item \textbf{A compiler} (\S\ref{sec:impl}): a shape-free front end that
+        compiles each lexical rule to a DFA by Brzozowski derivatives, derives
+        masking from the automaton, and emits a per-rule \emph{monoid
+        descriptor}.  Backends execute the descriptor as a prefix scan; a
+        specialization (affine / doubled / comment) is emitted only when it is
+        provably equivalent to the general automaton.
+  \item \textbf{An evaluation} (\S\ref{sec:eval}) across seven grammars and
+        three throughput tiers, including formats with \emph{no} prior
+        SIMD/GPU parser, at multiple input scales.
+\end{itemize}
+
+\paragraph{What this is not.}  The scan algebra $\SA$ does not parallelize general CFG
+parsing.  Unbounded backtracking and non-well-nested recursion fall outside it
+and must be declared as fallbacks.  The algebraic components are classical
+(\S\ref{sec:related}); our contribution is their \emph{systematization into a
+compiler} and the explicit distinction between compute parallelism and data
+movement.

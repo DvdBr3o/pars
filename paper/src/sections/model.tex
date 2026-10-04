@@ -1,0 +1,161 @@
+\section{The Scan Algebra $\SA$: A Rewrite System for Parallel Parsing}
+\label{sec:model}
+
+We formalize the intuition of \S\ref{sec:overview}.  The central object is a
+\emph{naive branch program} (NBP): a scalar program over a byte stream that uses
+only per-position loops, \texttt{if/else} on a byte class and a bounded
+register, a stack, and \texttt{emit}.  Equivalently, an NBP is a deterministic
+finite-state transducer~\cite{mealy,eilenberg} written as ordinary control flow;
+the name echoes the binary-decision / branch-program
+lineage~\cite{lee,wegener} (it is unrelated to \emph{nondeterministic}
+branching programs, which share the abbreviation NBP).  The scan algebra $\SA$
+is a rewrite system that turns such a program into branchless data flow, plus a
+characterization of when the rewrite applies.
+
+\subsection{Naive branch programs}
+\label{sec:nbp}
+
+Let $\Sigma$ be the byte alphabet, $\mathrm{cls}:\Sigma\to C$ a classification
+into classes, and $S$ a finite set of register states.  An NBP is a program of
+the form
+\begin{align*}
+  \text{state} &:= s_0;\\
+  \textbf{for } i &\in [0,n):\quad
+    \text{state} := \delta(\text{state}, \mathrm{cls}(x_i));\quad
+    \text{if } \pi(\text{state}) \text{ then } \mathsf{emit}(i)
+\end{align*}
+possibly with several independent registers, and with an additional stack loop
+for structural recursion.  This is exactly the shape of the scanners inside
+\textsf{simdjson} and \textsf{cuJSON}.
+
+\subsection{The rewrite}
+\label{sec:rewrite}
+
+\begin{description}
+  \item[$\Rone$ (classification).]  A terminal predicate is a byte set; each set
+    becomes a class bit mask $M \in \{0,1\}^n$.  On SIMD hardware this is a
+    compare plus a movemask.
+  \item[$\Rtwo$ (state $\to$ mask).]  A $k$-bit register becomes $k$ masks; bit
+    $i$ of a mask is the register bit before byte $i$.
+  \item[$\Rthree$ (branch $\to$ select).]
+    $\textbf{if }\gamma\textbf{ then }x:=f(x)\textbf{ else }x:=g(x)$ becomes
+    $x := (\gamma\wedge f(x))\vee(\neg\gamma\wedge g(x))$.
+  \item[$\Rfour$ (scan).]  Write $\tau_i = \delta(\cdot,\mathrm{cls}(x_i))$ for
+    the transform induced by byte $i$.  Then
+    \[
+      \text{state}_i = (\tau_{i-1}\circ\cdots\circ\tau_0)(s_0),
+    \]
+    a prefix product in the transformation monoid $(S\to S,\circ)$, computed by
+    a parallel scan~\cite{blelloch,ladnerfischer,hillissteele,sengupta}
+    (work $O(n)$, depth $O(\log n)$).  For $S=\{0,1\}$ the
+    transform is affine and the monoid is
+    $(a,b)\circ(a',b')=(a\wedge a',\,(b\wedge a')\oplus b')$, with identity
+    $(1,0)$.
+  \item[$\Rfive$ (compaction).]  $\textbf{for }i\ \textbf{if }M[i]\
+    \mathsf{emit}(i)$ becomes a popcount, an exclusive scan, and a
+    scatter~\cite{sengupta}.
+  \item[$\Rsix$ (well-nested reduction).]  For a visibly-pushdown (well-nested)
+    recursion, the stack is replaced by the depth
+    $\delta_i = \sum_{j\le i} \pm1$ (a $\mathbb{Z}$ group scan), followed by a
+    stable sort by depth and adjacent pairing, validated by bracket
+    type~\cite{alur,stackmonoid,baronvishkin,millerreif}.
+  \item[$\Rseven$ (associative reduction).]  A single self-recursive rule with
+    an associative operator lowers to a monoid
+    reduction~\cite{birdlists,birddemoor,meertens}.
+\end{description}
+
+\begin{definition}[Scan algebra $\SA$]
+\label{def:M}
+$\SA = \langle \Rone,\Rtwo,\Rthree,\Rfour,\Rfive,\Rsix,\Rseven\rangle$.
+\end{definition}
+
+\subsection{Soundness of the scan rewrite}
+\label{sec:soundness}
+
+\begin{proposition}[Scan]
+For the program of \S\ref{sec:nbp}, the rewrite $\Rfour$ yields, for every $i$,
+the same register state as the scalar loop.
+\end{proposition}
+\begin{proof}
+By induction on $i$: $\text{state}_i = \tau_{i-1}(\text{state}_{i-1}) =
+(\tau_{i-1}\circ\cdots\circ\tau_0)(s_0)$, and scan preserves the prefix product
+by associativity of $\circ$.
+\end{proof}
+
+\subsection{When does $\SA$ apply?}
+\label{sec:when}
+
+The scan algebra $\SA$ does \emph{not} parallelize general context-free parsing.  The rewrite
+applies exactly to grammars whose rule bodies are regular and whose recursion is
+well-nested or associative.
+
+\begin{definition}[$\SA$-reducible]
+A grammar $G$ is $\SA$-reducible iff (i) every non-recursive rule body is a
+regular expression over $\Sigma$, and (ii) every recursive strongly connected
+component of the rule graph is either \emph{visibly pushdown} (each recursive
+call is guarded by a terminal call/return pair) or a single self-recursive rule
+whose operator is associative.
+\end{definition}
+
+Condition (i) yields \Rfour, \Rfive{} (a regular body is a finite-state
+transducer~\cite{eilenberg,mealy}); condition (ii) yields \Rsix{} or \Rseven.  Unbounded lookahead and
+non-well-nested recursion fall outside and must be declared as fallbacks.
+
+\paragraph{Masking is not a shape.}
+We do not test rule syntax.  A lexical rule body is compiled to a DFA
+$A=(\Sigma,Q,q_0,\to,F)$ by Brzozowski derivatives~\cite{brzozowski}
+(automata theory~\cite{eilenberg,hopcroftullman}), and a byte is \emph{masked}
+iff its transition consumes it as part of an in-progress token:
+\[
+  \mathrm{masked}(q,b) \;\equiv\; (q\ne q_0)\wedge (q\xrightarrow{b} q')
+  \ \text{is defined}.
+\]
+This single predicate covers prefix-escaped strings, doubled-quote strings, and
+line/block comments (Figure~\ref{fig:mask}).  A per-state ``inside'' predicate
+is \emph{not} sufficient: for doubled delimiters it is off by one at the closing
+quote, so the per-transition form above is what we implement.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[node distance=11mm, font=\small,
+  st/.style={draw, circle, inner sep=1pt, minimum size=5.5mm},
+  ar/.style={-{Latex[length=1.4mm]}}]
+\node[st] (q0) {$q_0$};
+\node[st, right=of q0] (q1) {$q_1$};
+\node[st, right=of q1] (q2) {$q_2$};
+\draw[ar] (q0) -- node[above,font=\scriptsize]{$D$} (q1);
+\draw[ar] (q1) edge[loop above] node[font=\scriptsize]{$\bar D$} (q1);
+\draw[ar] (q1) -- node[above,font=\scriptsize]{$D$} (q2);
+\draw[ar,bend left=25] (q2) to node[below,font=\scriptsize]{$D$} (q1);
+\node[right=6mm of q2, font=\scriptsize] {doubled ($\texttt{""}$)};
+\end{tikzpicture}
+\caption{Masking from the automaton.  A byte is masked iff its transition
+consumes it inside a token; this is exact for doubled delimiters, where a
+per-state ``inside'' bit is off by one at the closing quote.}
+\label{fig:mask}
+\end{figure}
+
+\subsection{Cost model}
+\label{sec:cost}
+
+Primitives characterize \emph{which} computations are data-parallel; they do not
+by themselves yield end-to-end throughput.  For an $n$-byte input producing $k$
+tokens, on a discrete accelerator
+\[
+  T = T_{\mathrm{move\text{-}in}}(n) + T_{\mathrm{compute}}(n,k)
+      + T_{\mathrm{move\text{-}out}}(k) + T_{\mathrm{intermediate}} .
+\]
+
+\begin{proposition}[Movement bound]
+$\Rone$--$\Rseven$ give $T_{\mathrm{compute}} =
+O(n\,\mathrm{polylog}\,n / \mathrm{BW}_{\mathrm{gpu}})$ with $O(\log n)$ depth,
+independent of $T_{\mathrm{move}}$.  Hence end-to-end throughput $n/T$ is
+governed by $\max(T_{\mathrm{compute}}, T_{\mathrm{move}})$; if primitives
+materialize $\Theta(n)$ intermediates and results are copied to the host,
+$T_{\mathrm{move}}$ dominates and the parallelism of $\SA$ is unobservable.
+\end{proposition}
+
+This is why the compiler must also choose a \emph{schedule}: placement (results
+stay on device), fusion (compose $\Rone\circ\Rthree\circ\Rfour$ in one pass), and
+streaming (chunked pipelining).  We make the schedule explicit in
+\S\ref{sec:impl} and measure its effect in \S\ref{sec:eval}.

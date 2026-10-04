@@ -1,0 +1,27 @@
+[doc]
+name = "pars-paper"
+bundle = "https://relay.fullyjustified.net/default_bundle.tar"
+
+[[output]]
+name = "pars"
+type = "pdf"
+inputs = [
+    "main.tex",
+    "refs.bib",
+    "sections/abstract.tex",
+    "sections/intro.tex",
+    "sections/overview.tex",
+    "sections/model.tex",
+    "sections/implementation.tex",
+    "sections/evaluation.tex",
+    "sections/related.tex",
+    "sections/conclusion.tex",
+    "figures/framework.tex",
+    "figures/fig_sota.pdf",
+    "figures/fig_scaling.pdf",
+    "figures/fig_stages.pdf",
+    "figures/fig_parse.pdf",
+    "fonts/FiraCode-Regular.ttf",
+    "fonts/FiraCode-Bold.ttf",
+    "fonts/FiraCode-Medium.ttf",
+]

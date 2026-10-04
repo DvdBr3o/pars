@@ -1,0 +1,15 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented the scan algebra $\SA$, a rewrite system that turns a naive branch program
+into branchless masked data flow over a transformation monoid, and a compiler
+that lowers a grammar to a data-parallel scanner using $\SA$.  The algebra is
+classical; the contribution is making the derivation mechanical and explicit,
+including the difference between compute parallelism and data movement.  The
+generated scanners match hand-written SOTA where one exists (CSV, JSON) and run
+far ahead of the best CPU parsers for formats that no one has vectorized (TOML,
+INI, C-like).  Extending the recursion primitives to indentation (YAML) and
+named-tag nesting (XML) is the natural next step, and would let the generator
+claim the formats where it has the most to offer.
+
+The compiler, grammars, and benchmarks are open source.

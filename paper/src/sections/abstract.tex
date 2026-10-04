@@ -1,0 +1,25 @@
+\begin{abstract}
+Parsing is sequential in its classical formulation, yet state-of-the-art JSON
+parsers such as \textsf{simdjson} and \textsf{cuJSON} run an order of magnitude
+faster than textbook parsers by exploiting a small set of data-parallel
+primitives.  These primitives are usually presented as format-specific tricks
+(\textsf{prefix\_xor}, depth-sort bracket matching, \ldots), which makes them
+hard to reuse and impossible to derive.
+
+We show that they are instances of a single algebra, the \emph{scan algebra} $\SA$, and that
+a grammar can be compiled to a data-parallel parser by a \emph{mechanical
+rewrite} of a naive branch program into branchless masked data flow:
+a stateful byte recurrence becomes a prefix product in a \emph{transformation
+monoid} (a parallel scan), a filter becomes a \emph{compaction}, and the parser
+stack becomes a \emph{well-nested reduction}.  Masking is derived from a
+compiled automaton, not from the syntactic shape of rules; a specialization is
+emitted only when it is provably equivalent to the automaton.
+
+We build a compiler that turns a grammar into a CUDA implementation, and
+evaluate it on JSON, CSV, TOML, XML, INI and a C-like language.
+Our generated scanners match or exceed domain SOTA: on CSV they reach
+$\sim$3.7$\times$ \textsf{simdcsv} device-resident, and on TOML/INI/XML and
+C-like---none of which has a SIMD or GPU parser---they run far ahead of the best
+CPU parsers.  The host-boundary chunked path is PCIe-limited and remains below
+\textsf{simdcsv} on CSV.
+\end{abstract}

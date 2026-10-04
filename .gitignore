@@ -1,0 +1,32 @@
+# IDE / CommandLine Tool
+*.xmake
+*.vscode
+*.idea
+*.cache
+*.pixi
+
+# auto gen
+*build
+*clangd-trace.json
+*compile_commands.json
+*vs2022
+*vsxmake2022
+*CMakeLists.txt
+*target
+/perf*
+
+# remainings
+!.vscode/launch.json
+
+# mlir
+*tablegen_compile_commands.yml
+*pdll_compile_commands.yml# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# misc
+/sketch
+*.clangd
+
+# benchmark data (downloaded from simdjson-data)
+benchmarks/**/data/
