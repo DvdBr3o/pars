@@ -238,6 +238,15 @@ target("paper_data")
         -- 10 fresh runs, average, parse the last number.  The same source file
         -- (src/reproduced/cuJSON-standardjson-total-parsing.cu) is used.
         local cujson_reps = 10
+        local function cujson_emit(mb, vals, impl, variant)
+            if #vals == 0 then return end
+            table.sort(vals)
+            local sum = 0
+            for _, x in ipairs(vals) do sum = sum + x end
+            local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
+            br[#br + 1] = string.format("json,%s,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
+                impl, variant, mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+        end
         for _, mb in ipairs(scales) do
             local jf
             if dataset ~= "" then
@@ -248,26 +257,18 @@ target("paper_data")
                     "python3", {path.join(root, "bench", "gen_json.py"), tostring(mb), jf}
                 )
             end
-            local vals = {}
+            local vals_no, vals_d2h = {}, {}
             for _ = 1, cujson_reps do
                 local out = os.iorunv(cj, {"-b", jf})
-                local v = nil
-                for n in out:gmatch("([%d%.]+)") do v = n end
-                if v then
-                    local ms = tonumber(v)
-                    if ms and ms > 0 then
-                        vals[#vals + 1] = (mb * 1024.0 * 1024.0) / (ms / 1e3) / 1e9
-                    end
-                end
+                local nod = tonumber(out:match("CUJSON_NO_D2H%s*([%d%.]+)"))
+                local d2h = tonumber(out:match("CUJSON_TOTAL_D2H%s*([%d%.]+)"))
+                local function to_gbps(ms) return (mb * 1024.0 * 1024.0) / (ms / 1e3) / 1e9 end
+                if nod and nod > 0 then vals_no[#vals_no + 1] = to_gbps(nod) end
+                if d2h and d2h > 0 then vals_d2h[#vals_d2h + 1] = to_gbps(d2h) end
             end
-            if #vals > 0 then
-                table.sort(vals)
-                local sum = 0
-                for _, x in ipairs(vals) do sum = sum + x end
-                local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
-                br[#br + 1] = string.format("json,cujson,R1-R6+T_in+D2H,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
-                    mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
-            end
+            -- cuJSON's own Fig.9 interval (no D2H) plus the D2H-inclusive one.
+            cujson_emit(mb, vals_no, "cujson-nod2h", "R1-R6+T_in")
+            cujson_emit(mb, vals_d2h, "cujson", "R1-R6+T_in+D2H")
         end
 
         io.writefile(path.join(outdir, "pars.csv"), header .. "\n" .. table.concat(pr, "\n") .. "\n")

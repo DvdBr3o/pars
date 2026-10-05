@@ -55,7 +55,8 @@ SOTA_COLOR = {
     "rapidyaml": "#E377C2",  # YAML
     "inih": "#8C564B",  # INI
     "flex": "#DD8452",  # C-like
-    "cujson": "#DA8BC3",  # JSON (GPU, if added)
+    "cujson": "#DA8BC3",  # JSON (GPU, includes D2H)
+    "cujson-nod2h": "#B07AA1",  # JSON (GPU, cuJSON's own fig9 interval)
 }
 SOTA_FALLBACK = "#999999"
 # Formats with no known SIMD/GPU/optimized parser -> no SOTA bar.

@@ -2643,9 +2643,15 @@ inline int32_t* readFileStandard(char* file, int n, resultStructGJSON* resultStr
 		// cout << "4. Parser: \t\t" << time_EE.EE_t_pars <<endl;
 		// cout << "5. D2H: \t\t" << time_EE.copy_end<<endl;
 
-		cout << time_EE.copy_start + time_EE.EE_t_val + time_EE.EE_t_tok + time_EE.EE_t_pars
-					+ time_EE.copy_end
-			 << endl;
+		// Report both intervals, labelled:
+		//   CUJSON_NO_D2H    = H2D + Validation + Tokenization + Parser
+		//                      (this is cuJSON's own run_cujson_fig9.sh total)
+		//   CUJSON_TOTAL_D2H = the same + D2H (kept as the last line so a plain
+		//                      `... | tail -1` still yields the D2H total)
+		const float cujson_no_d2h = time_EE.copy_start + time_EE.EE_t_val
+								  + time_EE.EE_t_tok + time_EE.EE_t_pars;
+		cout << "CUJSON_NO_D2H " << cujson_no_d2h << endl;
+		cout << "CUJSON_TOTAL_D2H " << (cujson_no_d2h + time_EE.copy_end) << endl;
 
 		time_EE.EE_total += time_EE.EE_t;
 		time_EE.copy_end_toal += time_EE.copy_end;
