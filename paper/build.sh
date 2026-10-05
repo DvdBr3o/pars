@@ -23,6 +23,14 @@ else
     echo "(compile will fall back to placeholder boxes)" >&2
 fi
 
+# Point the LaTeX build at the selected environment's figure directory.  With
+# no tag we use the shared figures/ directory as a fallback.
+if [ -n "$ENV" ]; then
+    printf '\\renewcommand{\\figroot}{figures/%s/}\n' "$ENV" > src/figures/env.tex
+else
+    rm -f src/figures/env.tex
+fi
+
 if command -v kpsewhich >/dev/null 2>&1 && kpsewhich acmart.cls >/dev/null 2>&1; then
     latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=src src/main.tex
 elif command -v tectonic >/dev/null 2>&1; then

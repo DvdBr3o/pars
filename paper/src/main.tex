@@ -14,10 +14,15 @@
 \usepackage{amsmath,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+% Per-environment figure selection.  build.sh writes figures/env.tex with a
+% \figroot override (e.g. figures/a100/) so a build uses one machine's plots;
+% without it we fall back to the shared figures/ directory.
+\providecommand{\figroot}{figures/}
+\InputIfFileExists{figures/env.tex}{}{}
 % Include a generated figure if present, else a placeholder box.
 \newcommand{\paperfig}[2]{%
-  \IfFileExists{figures/#1.pdf}%
-    {\includegraphics[width=\linewidth]{figures/#1.pdf}}%
+  \IfFileExists{\figroot #1.pdf}%
+    {\includegraphics[width=\linewidth]{\figroot #1.pdf}}%
     {\fbox{\parbox[c][2.6cm][c]{0.92\linewidth}{\centering #2\\[2pt]%
      \footnotesize(run \texttt{paper/plots/make\_figures.py})}}}}
 \usepackage{tikz}

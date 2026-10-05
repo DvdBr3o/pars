@@ -16,10 +16,13 @@ compiled automaton, not from the syntactic shape of rules; a specialization is
 emitted only when it is provably equivalent to the automaton.
 
 We build a compiler that turns a grammar into a CUDA implementation, and
-evaluate it on JSON, CSV, TOML, XML, INI and a C-like language.
-Our generated scanners match or exceed domain SOTA: on CSV they reach
-$\sim$3.7$\times$ \textsf{simdcsv} device-resident, and on TOML/INI/XML and
-C-like---none of which has a SIMD or GPU parser---they run far ahead of the best
-CPU parsers.  The host-boundary chunked path is PCIe-limited and remains below
-\textsf{simdcsv} on CSV.
+evaluate it on JSON, CSV, TOML, XML, INI and a C-like language, on two testbeds
+(a laptop GPU and an A100 node).  Separating transport from compute, the
+generated device-resident scanners match or exceed domain SOTA: on CSV they
+reach $3.6\times$ \textsf{simdcsv} on the laptop and $23\times$ on the A100,
+and on TOML/INI/XML and C-like---none of which has a SIMD or GPU parser---they
+run far ahead of the best CPU parsers.  Adding data movement is decisive: the
+host-boundary chunked path is PCIe-limited, staying below \textsf{simdcsv} on
+CSV on the laptop while surpassing it on the A100 node, whose shared CPU is the
+bottleneck.
 \end{abstract}

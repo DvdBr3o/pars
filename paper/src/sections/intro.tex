@@ -50,8 +50,9 @@ language, is a depth group-scan plus a sort.
         specialization (affine / doubled / comment) is emitted only when it is
         provably equivalent to the general automaton.
   \item \textbf{An evaluation} (\S\ref{sec:eval}) across seven grammars and
-        three throughput tiers, including formats with \emph{no} prior
-        SIMD/GPU parser, at multiple input scales.
+        three transport tiers (device-resident, H2D-only, host boundary) on two
+        testbeds, including formats with \emph{no} prior SIMD/GPU parser, at
+        multiple input scales.
 \end{itemize}
 
 \paragraph{What this is not.}  The scan algebra $\SA$ does not parallelize general CFG

@@ -374,8 +374,8 @@ def figure_stages(stages, scale=None):
 def figure_parse(pars_tiers, parse_data, base, scale=None):
     """End-to-end comparison at the largest scale, matched per format.
 
-    JSON is compared at the *structural* interval (pars N3c = H2D + R1-R6 + D2H)
-    against cuJSON (whose standard-JSON total likewise includes D2H); TOML/INI/XML
+    JSON is compared at the *structural* interval (pars N2 = H2D + R1-R6, no
+    D2H) against cuJSON (whose own Fig.~9 total likewise excludes D2H); TOML/INI/XML
     are compared as a *full parse* (pars P3 = GPU R1-R6 + host M+D) against the
     DOM parser of each format.
     """
@@ -384,7 +384,7 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
     scale = scale or int(pars_tiers["scale_mb"].max())
     # (format, pars variant, which frame, baseline impl, kind label)
     specs = [
-        ("json", "N3c", "tiers", "cujson", "structural"),
+        ("json", "N2", "tiers", "cujson", "structural"),
         ("toml", "P3", "parse", "toml++", "full parse"),
         ("ini", "P3", "parse", "inih", "full parse"),
         ("xml", "P3", "parse", "pugixml", "full parse"),
