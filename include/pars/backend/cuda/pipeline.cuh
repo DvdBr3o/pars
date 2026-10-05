@@ -519,7 +519,37 @@ __global__ void depth_clamp_kernel(std::int32_t* depth, int n_oc) {
 
 inline void check(cudaError_t e, const char* what) {
 	if (e != cudaSuccess) {
-		std::fprintf(stderr, "cuda error %s: %s\n", what, cudaGetErrorString(e));
+		std::size_t fr = 0, tot = 0;
+		cudaMemGetInfo(&fr, &tot);
+		std::fprintf(
+			stderr,
+			"cuda error %s: %s (free=%zu MiB, total=%zu MiB)\n",
+			what,
+			cudaGetErrorString(e),
+			fr >> 20,
+			tot >> 20
+		);
+		std::exit(1);
+	}
+}
+
+// Device allocation that, on failure, reports exactly how much was requested
+// versus how much is free, so an OOM can be attributed to an oversize working
+// set or to the GPU being otherwise occupied.
+inline void malloc_or_die(void** p, std::size_t bytes, const char* what) {
+	cudaError_t e = cudaMalloc(p, bytes);
+	if (e != cudaSuccess) {
+		std::size_t fr = 0, tot = 0;
+		cudaMemGetInfo(&fr, &tot);
+		std::fprintf(
+			stderr,
+			"[pars-gpu] %s: need %.1f MiB, free %.1f MiB, total %.1f MiB (%s)\n",
+			what,
+			static_cast<double>(bytes) / 1048576.0,
+			static_cast<double>(fr) / 1048576.0,
+			static_cast<double>(tot) / 1048576.0,
+			cudaGetErrorString(e)
+		);
 		std::exit(1);
 	}
 }
@@ -609,28 +639,28 @@ struct DeviceCache {
 		f(dwt);
 		f(dpref);
 		f(dmask);
-		check(cudaMalloc(&data, padded), "cache data");
-		check(cudaMalloc(&f2, n_words), "cache f2");
-		check(cudaMalloc(&f2_scan, n_words), "cache f2_scan");
-		check(cudaMalloc(&struct_m, n_words * 4), "cache struct_m");
-		check(cudaMalloc(&openclose_m, n_words * 4), "cache openclose_m");
-		check(cudaMalloc(&delim_m, n_words * 4), "cache delim_m");
-		check(cudaMalloc(&escape_m, n_words * 4), "cache escape_m");
-		check(cudaMalloc(&real_delim, n_words * 4), "cache real_delim");
-		check(cudaMalloc(&in_string, n_words * 4), "cache in_string");
-		check(cudaMalloc(&counts, n_words * 4), "cache counts");
-		check(cudaMalloc(&excl, n_words * 4), "cache excl");
-		check(cudaMalloc(&struct_out, n_words * 4), "cache struct_out");
-		check(cudaMalloc(&openclose_out, n_words * 4), "cache openclose_out");
-		check(cudaMalloc(&struct_excl, n_words * 4), "cache struct_excl");
-		check(cudaMalloc(&oc_excl, n_words * 4), "cache oc_excl");
-		check(cudaMalloc(&dwt, (std::size_t)n_words * 8), "cache dwt");
-		check(cudaMalloc(&dpref, (std::size_t)n_words * 8), "cache dpref");
-		check(cudaMalloc(&dmask, (std::size_t)n_words * 4), "cache dmask");
+		malloc_or_die((void**)&data, padded, "cache data");
+		malloc_or_die((void**)&f2, n_words, "cache f2");
+		malloc_or_die((void**)&f2_scan, n_words, "cache f2_scan");
+		malloc_or_die((void**)&struct_m, n_words * 4, "cache struct_m");
+		malloc_or_die((void**)&openclose_m, n_words * 4, "cache openclose_m");
+		malloc_or_die((void**)&delim_m, n_words * 4, "cache delim_m");
+		malloc_or_die((void**)&escape_m, n_words * 4, "cache escape_m");
+		malloc_or_die((void**)&real_delim, n_words * 4, "cache real_delim");
+		malloc_or_die((void**)&in_string, n_words * 4, "cache in_string");
+		malloc_or_die((void**)&counts, n_words * 4, "cache counts");
+		malloc_or_die((void**)&excl, n_words * 4, "cache excl");
+		malloc_or_die((void**)&struct_out, n_words * 4, "cache struct_out");
+		malloc_or_die((void**)&openclose_out, n_words * 4, "cache openclose_out");
+		malloc_or_die((void**)&struct_excl, n_words * 4, "cache struct_excl");
+		malloc_or_die((void**)&oc_excl, n_words * 4, "cache oc_excl");
+		malloc_or_die((void**)&dwt, (std::size_t)n_words * 8, "cache dwt");
+		malloc_or_die((void**)&dpref, (std::size_t)n_words * 8, "cache dpref");
+		malloc_or_die((void**)&dmask, (std::size_t)n_words * 4, "cache dmask");
 		if (!bad)
-			check(cudaMalloc(&bad, sizeof(bool)), "cache bad");
+			malloc_or_die((void**)&bad, sizeof(bool), "cache bad");
 		if (!mismatched)
-			check(cudaMalloc(&mismatched, sizeof(bool)), "cache mismatched");
+			malloc_or_die((void**)&mismatched, sizeof(bool), "cache mismatched");
 		cap_words = n_words;
 	}
 
@@ -643,8 +673,8 @@ struct DeviceCache {
 		};
 		f(struct_idx);
 		f(struct_char);
-		check(cudaMalloc(&struct_idx, n_struct * 4), "cache struct_idx");
-		check(cudaMalloc(&struct_char, n_struct), "cache struct_char");
+		malloc_or_die((void**)&struct_idx, n_struct * 4, "cache struct_idx");
+		malloc_or_die((void**)&struct_char, n_struct, "cache struct_char");
 		cap_struct = n_struct;
 	}
 
@@ -654,7 +684,7 @@ struct DeviceCache {
 			return;
 		if (pair_pos)
 			cudaFree(pair_pos);
-		check(cudaMalloc(&pair_pos, n * 4), "cache pair_pos");
+		malloc_or_die((void**)&pair_pos, n * 4, "cache pair_pos");
 		cap_pairs = n;
 	}
 
@@ -672,13 +702,13 @@ struct DeviceCache {
 		f(depth);
 		f(order);
 		f(oc_pair);
-		check(cudaMalloc(&oc_struct_pos, n_oc * 4), "cache oc_struct_pos");
-		check(cudaMalloc(&oc_char, n_oc), "cache oc_char");
-		check(cudaMalloc(&delta, n_oc * 4), "cache delta");
-		check(cudaMalloc(&bal, n_oc * 4), "cache bal");
-		check(cudaMalloc(&depth, n_oc * 4), "cache depth");
-		check(cudaMalloc(&order, n_oc * 4), "cache order");
-		check(cudaMalloc(&oc_pair, n_oc * 4), "cache oc_pair");
+		malloc_or_die((void**)&oc_struct_pos, n_oc * 4, "cache oc_struct_pos");
+		malloc_or_die((void**)&oc_char, n_oc, "cache oc_char");
+		malloc_or_die((void**)&delta, n_oc * 4, "cache delta");
+		malloc_or_die((void**)&bal, n_oc * 4, "cache bal");
+		malloc_or_die((void**)&depth, n_oc * 4, "cache depth");
+		malloc_or_die((void**)&order, n_oc * 4, "cache order");
+		malloc_or_die((void**)&oc_pair, n_oc * 4, "cache oc_pair");
 		cap_oc = n_oc;
 	}
 };
@@ -863,6 +893,20 @@ device_result scan_device_impl(
 	check(cudaGetLastError(), "pack counts");
 	const std::uint32_t n_struct = packed[0];
 	const std::uint32_t n_oc	 = packed[1];
+
+	if (std::getenv("PARS_GPU_MEM_DEBUG")) {
+		std::size_t fr = 0, tot = 0;
+		cudaMemGetInfo(&fr, &tot);
+		std::fprintf(
+			stderr,
+			"[pars-gpu] n=%zu B  n_struct=%u  n_oc=%u  free=%zu MiB / %zu MiB\n",
+			size,
+			n_struct,
+			n_oc,
+			fr >> 20,
+			tot >> 20
+		);
+	}
 
 	b.ensure_struct(n_struct);
 	b.ensure_oc(n_oc);
