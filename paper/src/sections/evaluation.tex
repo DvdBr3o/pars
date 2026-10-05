@@ -69,13 +69,16 @@ advantage therefore only materializes device-resident (N1a).
 \begin{figure*}[t]
 \centering
 \paperfig{fig_scaling}{Throughput vs input size}
-\caption{Throughput vs.\ input size (log--log axes; mean of $N$ runs).  Device
-stage-1 peaks at L2-sized inputs and then declines (memory-bandwidth bound).
-The chunked host path rises as fixed costs amortize and then plateaus at the
-PCIe host-boundary limit ($1.51n$ bytes moved); for CSV it stays below
-\textsf{simdcsv}, which is DRAM-bound on the CPU.  \textsf{cuJSON} is shown at
-its own Fig.~9 interval (H2D $+$ validation $+$ tokenization $+$ structure,
-\emph{excluding} D2H).}
+\caption{Throughput vs.\ input size (log--log axes; mean of $N$ runs).  The pars
+tiers separate the transport cost: \textbf{N1} is device-resident ($R1$--$R5$,
+no transfer), \textbf{N2} adds H2D only (results stay on device), and
+\textbf{N3} is the host boundary including D2H (the chunked-overlap variant
+$N3c$).  Device stage-1 peaks at L2-sized inputs and then declines
+(memory-bandwidth bound); the host-boundary path rises as fixed costs amortize
+and then plateaus at the PCIe limit ($1.51n$ bytes moved); for CSV it stays
+below \textsf{simdcsv}, which is DRAM-bound on the CPU.  \textsf{cuJSON} is
+shown at its own Fig.~9 interval (H2D $+$ validation $+$ tokenization $+$
+structure, \emph{excluding} D2H).}
 \label{fig:scaling}
 \end{figure*}
 

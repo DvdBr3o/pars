@@ -42,8 +42,16 @@ LABELS = {
 }
 
 # pars series (uniform colours) …
-PARS_LABEL = {"N1a": "pars stage-1 (device)", "N3c": "pars chunked (host)"}
-PARS_COLOR = {"N1a": "#4C72B0", "N3c": "#55A868"}
+PARS_LABEL = {
+    "N1a": "pars N1 (device)",
+    "N2": "pars N2 (H2D + stage-1)",
+    "N3c": "pars N3 (host, chunked)",
+}
+PARS_COLOR = {"N1a": "#4C72B0", "N2": "#55A868", "N3c": "#2E7D32"}
+PARS_MARKER = {"N1a": "o", "N2": "s", "N3c": "D"}
+# One representative per transport tier: N1 = no transfer (device), N2 = H2D
+# only, N3 = host boundary incl. D2H (N3c, the chunked-overlap variant).
+PARS_TIERS = ["N1a", "N2", "N3c"]
 
 # … and domain SOTA, one colour per \emph{language}'s own SOTA implementation.
 # The SOTA bar/line for a format uses only that format's colour.
@@ -305,19 +313,14 @@ def figure_scaling(pars, base):
         return True
 
     for ax, f in zip(axes.flat, fmts):
-        plot(
-            ax,
-            pars[(pars.format == f) & (pars.variant == "N1a")],
-            PARS_COLOR["N1a"],
-            PARS_LABEL["N1a"],
-        )
-        plot(
-            ax,
-            pars[(pars.format == f) & (pars.variant == "N3c")],
-            PARS_COLOR["N3c"],
-            PARS_LABEL["N3c"],
-            "s",
-        )
+        for var in PARS_TIERS:
+            plot(
+                ax,
+                pars[(pars.format == f) & (pars.variant == var)],
+                PARS_COLOR[var],
+                PARS_LABEL[var],
+                PARS_MARKER[var],
+            )
         b = base[base.format == f]
         for impl in dict.fromkeys(b["impl"]):
             plot(ax, b[b.impl == impl], _sota_color(impl), SOTA_LABEL.get(impl, impl), "^")
