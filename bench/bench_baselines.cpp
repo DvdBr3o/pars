@@ -14,6 +14,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -72,8 +74,20 @@ int main(int argc, char** argv) {
 	const int		  iters	 = argc > 2 ? std::atoi(argv[2]) : 10;
 	const std::size_t target = mb * 1024 * 1024;
 
-	std::string		  json;
-	{
+	// Optional real Standard-JSON dataset (argv[3]).  cuJSON's Fig.9 harness
+	// parses real *_large_record.json files, so simdjson must see the SAME bytes.
+	const char* json_file = argc > 3 ? argv[3] : nullptr;
+	std::string json;
+	if (json_file) {
+		std::ifstream f(json_file, std::ios::binary);
+		if (!f) {
+			std::fprintf(stderr, "cannot open json file: %s\n", json_file);
+			return 1;
+		}
+		json.assign(
+			(std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()
+		);
+	} else {
 		const std::string rec =
 			"{\"id\":123,\"name\":\"x \\\"y\\\"\",\"a\":[1,2,3],\"n\":{\"z\":null}}";
 		json.push_back('[');
@@ -84,6 +98,7 @@ int main(int argc, char** argv) {
 		}
 		json.push_back(']');
 	}
+	const std::size_t json_mb = (json.size() + (1u << 20) - 1) >> 20;
 	std::string toml;
 	{
 		std::size_t i = 0;
@@ -107,9 +122,13 @@ int main(int argc, char** argv) {
 	);
 
 	{
+		// Match cuJSON's own simdjson baseline (ondemand quickstart `iterate`),
+		// but on a properly padded buffer: ondemand reads SIMDJSON_PADDING bytes
+		// past the end, so passing a bare std::string is undefined behaviour.
+		simdjson::padded_string ps(json.data(), json.size());
 		simdjson::ondemand::parser p;
-		emit("json", "simdjson", mb, sample(json.size(), iters, [&] {
-				 auto d = p.iterate(json);
+		emit("json", "simdjson", json_mb, sample(json.size(), iters, [&] {
+				 auto d = p.iterate(ps);
 				 for (auto v : d) (void)v;
 			 }));
 	}
