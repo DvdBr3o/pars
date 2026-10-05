@@ -73,7 +73,9 @@ advantage therefore only materializes device-resident (N1a).
 stage-1 peaks at L2-sized inputs and then declines (memory-bandwidth bound).
 The chunked host path rises as fixed costs amortize and then plateaus at the
 PCIe host-boundary limit ($1.51n$ bytes moved); for CSV it stays below
-\textsf{simdcsv}, which is DRAM-bound on the CPU.}
+\textsf{simdcsv}, which is DRAM-bound on the CPU.  \textsf{cuJSON} is shown at
+its own Fig.~9 interval (H2D $+$ validation $+$ tokenization $+$ structure,
+\emph{excluding} D2H).}
 \label{fig:scaling}
 \end{figure*}
 

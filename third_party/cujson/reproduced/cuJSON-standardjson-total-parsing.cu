@@ -2650,8 +2650,10 @@ inline int32_t* readFileStandard(char* file, int n, resultStructGJSON* resultStr
 		//                      `... | tail -1` still yields the D2H total)
 		const float cujson_no_d2h = time_EE.copy_start + time_EE.EE_t_val
 								  + time_EE.EE_t_tok + time_EE.EE_t_pars;
-		cout << "CUJSON_NO_D2H " << cujson_no_d2h << endl;
+		// Default (last line) is the no-D2H total, matching cuJSON's own Fig.9
+		// interval; the D2H-inclusive total is printed first for reference.
 		cout << "CUJSON_TOTAL_D2H " << (cujson_no_d2h + time_EE.copy_end) << endl;
+		cout << "CUJSON_NO_D2H " << cujson_no_d2h << endl;
 
 		time_EE.EE_total += time_EE.EE_t;
 		time_EE.copy_end_toal += time_EE.copy_end;

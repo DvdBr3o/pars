@@ -55,10 +55,13 @@ SOTA_COLOR = {
     "rapidyaml": "#E377C2",  # YAML
     "inih": "#8C564B",  # INI
     "flex": "#DD8452",  # C-like
-    "cujson": "#DA8BC3",  # JSON (GPU, includes D2H)
-    "cujson-nod2h": "#B07AA1",  # JSON (GPU, cuJSON's own fig9 interval)
+    "cujson": "#DA8BC3",  # JSON (GPU; cuJSON's own Fig.9 total, no D2H)
 }
 SOTA_FALLBACK = "#999999"
+# Legend labels for baseline implementations.
+SOTA_LABEL = {
+    "cujson": "cuJSON",
+}
 # Formats with no known SIMD/GPU/optimized parser -> no SOTA bar.
 NO_SOTA: set[str] = set()
 
@@ -317,7 +320,7 @@ def figure_scaling(pars, base):
         )
         b = base[base.format == f]
         for impl in dict.fromkeys(b["impl"]):
-            plot(ax, b[b.impl == impl], _sota_color(impl), impl, "^")
+            plot(ax, b[b.impl == impl], _sota_color(impl), SOTA_LABEL.get(impl, impl), "^")
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xticks(sorted(set(pars["scale_mb"])))
