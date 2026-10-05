@@ -6,7 +6,7 @@
 //
 // Output: format,impl,variant,scale_mb,GBps_p50,GBps_p95,GBps_min,GBps_max,tokens,bytes_moved
 #include <simdjson.h>
-#include "toml.hpp"
+#include <toml++/toml.h>
 #include "pugixml.hpp"
 #include "ini.h"
 

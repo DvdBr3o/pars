@@ -17,21 +17,26 @@
 #include "grammars/ini.hpp"
 #include "grammars/xml.hpp"
 
-#include <simdjson.h>
-#include "toml.hpp"
-#include "pugixml.hpp"
-#include "ini.h"
-
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
+
+// Host-only SOTA baselines (toml++/pugixml/inih/simdjson) live in
+// bench/host_pointquery.cpp so nvcc never parses those headers; see that file.
+// Called through C linkage.
+extern "C" {
+double pq_json_simdjson(const char* data, std::size_t n, int reps, int* ok);
+double pq_ini_inih(const char* data, std::size_t n, int reps, int* ok);
+double pq_toml_tomlpp(const char* data, std::size_t n, int reps, int* ok);
+double pq_xml_pugixml(const char* data, std::size_t n, int reps, int* ok);
+}
 
 using namespace std::chrono;
 using namespace pars;
@@ -137,12 +142,6 @@ std::string repeat(const std::string& rec, std::size_t target) {
 	return out;
 }
 
-int ini_count_cb(void* user, const char* section, const char* name, const char* value) {
-	auto* m = static_cast<std::unordered_map<std::string, std::string>*>(user);
-	m->emplace(std::string(section) + "." + name, value);
-	return 1;
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -188,34 +187,15 @@ int main(int argc, char** argv) {
 				reps,
 				[&] {
 					bool o;
-					g_sink += (std::uint64_t)pars_nav(c, ':', "id", o).size() + o;
+					g_sink = g_sink + (std::uint64_t)pars_nav(c, ':', "id", o).size() + o;
 				}
 			),
 			ok
 		);
 
-		simdjson::dom::parser  p;
-		simdjson::dom::element root;
-		if (!p.parse(doc).get(root)) {
-			simdjson::dom::array   arr	 = root.get_array();
-			simdjson::dom::element first = arr.at(0);
-			int64_t				   idv	 = 0;
-			(void)first["id"].get(idv);
-			emit_row(
-				"json",
-				"simdjson",
-				mb,
-				time_queries(
-					reps,
-					[&] {
-						int64_t x = 0;
-						(void)arr.at(0)["id"].get(x);
-						g_sink += (std::uint64_t)x;
-					}
-				),
-				idv == 123
-			);
-		}
+		int	   ok_sd = 0;
+		double ns_sd = pq_json_simdjson(doc.data(), doc.size(), reps, &ok_sd);
+		emit_row("json", "simdjson", mb, ns_sd, ok_sd != 0);
 	}
 
 	// ---------------- INI: first "[section]"'s "num" ----------------
@@ -242,22 +222,15 @@ int main(int argc, char** argv) {
 				reps,
 				[&] {
 					bool o;
-					g_sink += (std::uint64_t)pars_nav(c, '=', "num", o).size() + o;
+					g_sink = g_sink + (std::uint64_t)pars_nav(c, '=', "num", o).size() + o;
 				}
 			),
 			ok
 		);
 
-		std::unordered_map<std::string, std::string> m;
-		ini_parse_string(doc.c_str(), ini_count_cb, &m);
-		auto it = m.find("section.num");
-		emit_row(
-			"ini",
-			"inih",
-			mb,
-			time_queries(reps, [&] { g_sink += (m.find("section.num") != m.end()); }),
-			it != m.end()
-		);
+		int	   ok_ih = 0;
+		double ns_ih = pq_ini_inih(doc.data(), doc.size(), reps, &ok_ih);
+		emit_row("ini", "inih", mb, ns_ih, ok_ih != 0);
 	}
 
 	// ---------------- TOML: first "[t0]"'s "port" ----------------
@@ -287,26 +260,15 @@ int main(int argc, char** argv) {
 				reps,
 				[&] {
 					bool o;
-					g_sink += (std::uint64_t)pars_nav(c, '=', "port", o).size() + o;
+					g_sink = g_sink + (std::uint64_t)pars_nav(c, '=', "port", o).size() + o;
 				}
 			),
 			ok
 		);
 
-		auto	tbl	 = toml::parse(doc);
-		int64_t port = 0;
-		if (auto node = tbl["t0"]["port"].value<int64_t>())
-			port = *node;
-		emit_row(
-			"toml",
-			"toml++",
-			mb,
-			time_queries(
-				reps,
-				[&] { g_sink += (std::uint64_t)tbl["t0"]["port"].value<int64_t>().value_or(0); }
-			),
-			port == 8080
-		);
+		int	   ok_tp = 0;
+		double ns_tp = pq_toml_tomlpp(doc.data(), doc.size(), reps, &ok_tp);
+		emit_row("toml", "toml++", mb, ns_tp, ok_tp != 0);
 	}
 
 	// ---------------- XML: first <item>'s "id" attribute ----------------
@@ -335,25 +297,15 @@ int main(int argc, char** argv) {
 				reps,
 				[&] {
 					bool o;
-					g_sink += (std::uint64_t)pars_nav(c, '=', "id", o).size() + o;
+					g_sink = g_sink + (std::uint64_t)pars_nav(c, '=', "id", o).size() + o;
 				}
 			),
 			ok
 		);
 
-		pugi::xml_document pdoc;
-		pdoc.load_buffer(doc.data(), doc.size());
-		auto item_node = pdoc.child("root").child("item");
-		emit_row(
-			"xml",
-			"pugixml",
-			mb,
-			time_queries(
-				reps,
-				[&] { g_sink += (std::uint64_t)item_node.attribute("id").value()[0]; }
-			),
-			!item_node.attribute("id").empty()
-		);
+		int	   ok_px = 0;
+		double ns_px = pq_xml_pugixml(doc.data(), doc.size(), reps, &ok_px);
+		emit_row("xml", "pugixml", mb, ns_px, ok_px != 0);
 	}
 	return 0;
 }

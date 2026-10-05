@@ -1,6 +1,11 @@
 set_project("pars")
 add_rules("mode.debug", "mode.release", "mode.releasedbg")
 
+-- Third-party baselines are pulled from xmake-repo (not vendored).  cuJSON and
+-- simdcsv stay vendored because they are patched for benchmarking (deep source
+-- edits), not pristine library usage.
+add_requires("simdjson", "toml++", "pugixml", "inih")
+
 target("pars")
     set_kind("headeronly")
     add_headerfiles("include/(pars/**.hpp)")
@@ -20,16 +25,12 @@ target("pars_bench")
     set_languages("cxxlatest")
     add_cxxflags("-march=native")
 
--- Domain SOTA baselines: toml++, pugixml, rapidyaml, inih, simdjson.
+-- Domain SOTA baselines: toml++, pugixml, inih, simdjson (from xmake-repo).
 target("pars_bench_baselines")
     set_kind("binary")
     add_deps("pars")
     add_files("bench/bench_baselines.cpp")
-    add_files("third_party/pugixml/pugixml.cpp")
-    add_files("third_party/inih/ini.c")
-    add_files("$(projectdir)/../simdjson/singleheader/simdjson.cpp")
-    add_includedirs("third_party/pugixml", "third_party/tomlplusplus",
-                    "third_party/inih", "$(projectdir)/../simdjson/singleheader")
+    add_packages("simdjson", "toml++", "pugixml", "inih")
     set_languages("cxxlatest")
     add_cxxflags("-march=native")
 
@@ -39,8 +40,8 @@ target("pars_bench_parse")
     add_deps("pars")
     add_cugencodes("native")
     add_files("bench/bench_parse.cu")
-    add_files("$(projectdir)/../simdjson/singleheader/simdjson.cpp")
-    add_includedirs("bench", "$(projectdir)/../simdjson/singleheader")
+    add_packages("simdjson")
+    add_includedirs("bench")
     set_languages("cxxlatest")
 
 -- pars-side full parse for TOML/XML/INI (GPU R1-R6 + host post-R6 M+D).
@@ -58,11 +59,9 @@ target("pars_bench_pointquery")
     add_deps("pars")
     add_cugencodes("native")
     add_files("bench/bench_pointquery.cu")
-    add_files("third_party/pugixml/pugixml.cpp")
-    add_files("third_party/inih/ini.c")
-    add_files("$(projectdir)/../simdjson/singleheader/simdjson.cpp")
-    add_includedirs("bench", "third_party/pugixml", "third_party/tomlplusplus",
-                    "third_party/inih", "$(projectdir)/../simdjson/singleheader")
+    add_files("bench/host_pointquery.cpp")
+    add_packages("simdjson", "toml++", "pugixml", "inih")
+    add_includedirs("bench")
     set_languages("cxxlatest")
 
 -- cuJSON (GPU JSON) reference baseline, reproduced and patched for CUDA 13/CCCL.

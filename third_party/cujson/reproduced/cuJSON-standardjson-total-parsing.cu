@@ -1,5 +1,3 @@
-#include <cuda/std/tuple>
-#include <tuple>
 #include <stdio.h>
 #include <iostream>
 #include <stdint.h>
@@ -10,7 +8,9 @@
 #include <x86intrin.h>
 #include <string.h>
 #include <bitset>
+#include <thrust/iterator/zip_iterator.h>
 #include <thrust/sort.h>
+#include <thrust/tuple.h>
 #include <thrust/device_ptr.h>
 #include <thrust/binary_search.h>
 #include <thrust/device_vector.h>
@@ -325,10 +325,10 @@ __device__ __forceinline__ void vectorizedClassification(
 												  // 11110000 1000____
 
 	constexpr const uint8_t SURROGATE = 1 << 4;	  // The decoded character must be not be in
-												 // U+D800...DFFF 11101101 101_____
+												  // U+D800...DFFF 11101101 101_____
 
-	constexpr const uint8_t TWO_CONTS = 1 << 7;	 // Two continious bit after each other
-												 // 10______ 10______
+	constexpr const uint8_t TWO_CONTS = 1 << 7;	  // Two continious bit after each other
+												  // 10______ 10______
 
 	constexpr const uint8_t TOO_LARGE = 1 << 3;	 // The decoded character must be less than or equal
 												 // to U+10FFFF 11110100 1001____ 11110100 101_____
@@ -456,7 +456,7 @@ __device__ __forceinline__ void continuationBytes(
 	uint32_t must32 = __vcmpgtu4(gt, 0);  // gt --> hamin must32 hast o mitonim hazfesh knim
 
 	must32Upper_sc	= (must32 & 0x80808080) ^ sc;  //  sc --> output of 32 bit check
-	// upper bit of each 4 character
+												   // upper bit of each 4 character
 }
 
 __global__ void checkAscii(
@@ -1125,7 +1125,7 @@ __global__ void findEscapedQuoteMerge_NEW(
 			backslashes = backslashes & (~overflow);  //[0,1,1,1,0,0,0,0]
 			uint32_t applyEscapedChar =
 				(backslashes << 1) | overflow;	//[1,1,1,0,0,0,0,1] --> chn amaln yek backslash
-												//moaser bode k khonsa mikrde miomde to
+												// moaser bode k khonsa mikrde miomde to
 
 			// All BACKSLASHES that are at ODD LOCATION and not ESCAPED
 			uint32_t oddSequence		 = backslashes & oddBits & ~applyEscapedChar;
@@ -2094,7 +2094,7 @@ int32_t* Parser(
 	// oc_idx);
 
 	// Use zip iterator to combine oc_idx and open_close_GPU
-	auto zipped_begin = thrust::make_zip_iterator(cuda::std::make_tuple(oc_idx, open_close_GPU));
+	auto zipped_begin = thrust::make_zip_iterator(thrust::make_tuple(oc_idx, open_close_GPU));
 	// auto zipped_end = thrust::make_zip_iterator(cuda::std::make_tuple(oc_idx + oc_cnt,
 	// open_close_GPU + oc_cnt));
 
