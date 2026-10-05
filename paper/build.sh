@@ -10,9 +10,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Optional first argument (or $ENV) tags the environment; figures are written to
+# src/figures/<env>/ so per-machine plots stay separate.  Data is shared
+# (plots/data/), produced by `xmake build paper_data`.
+ENV="${1:-${ENV:-}}"
+
 # regenerate the data figures
 if command -v uv >/dev/null 2>&1; then
-    uv run plots/make_figures.py
+    if [ -n "$ENV" ]; then uv run plots/make_figures.py --env "$ENV"; else uv run plots/make_figures.py; fi
 else
     echo "uv not found; install uv (https://docs.astral.sh/uv/) to render figures" >&2
     echo "(compile will fall back to placeholder boxes)" >&2

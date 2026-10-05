@@ -43,6 +43,8 @@ template<class F>
 static std::vector<double> sample(std::size_t bytes, int iters, F&& f) {
 	std::vector<double> g;
 	g.reserve(iters);
+	f();
+	f();  // warm up before timing
 	for (int i = 0; i < iters; ++i) {
 		auto a = steady_clock::now();
 		f();

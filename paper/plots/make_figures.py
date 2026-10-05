@@ -26,6 +26,12 @@ import paperplots as P  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data", type=Path, default=P.DATADIR)
+    ap.add_argument(
+        "--env",
+        default=None,
+        help="environment tag; figures are written to src/figures/<env> "
+        "(keeps per-machine plots separate; data stays in plots/data/)",
+    )
     ap.add_argument("--out", type=Path, default=P.FIGDIR)
     ap.add_argument(
         "--only",
@@ -49,13 +55,14 @@ def main() -> int:
         "parse": lambda: P.figure_parse(pars, parse, base),
     }
     names = args.only or list(builders)
-    args.out.mkdir(parents=True, exist_ok=True)
+    out = (P.FIGDIR / args.env) if args.env else args.out
+    out.mkdir(parents=True, exist_ok=True)
     for name in names:
         fig = builders[name]()
         for ext in args.formats:
-            fig.savefig(args.out / f"fig_{name}.{ext}")
+            fig.savefig(out / f"fig_{name}.{ext}")
         plt.close(fig)
-        print(f"wrote {args.out}/fig_{name}.{{{','.join(args.formats)}}}")
+        print(f"wrote {out}/fig_{name}.{{{','.join(args.formats)}}}")
     return 0
 
 

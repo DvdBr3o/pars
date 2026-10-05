@@ -213,9 +213,11 @@ target("paper_data")
             end
             if #vals > 0 then
                 table.sort(vals)
+                local sum = 0
+                for _, x in ipairs(vals) do sum = sum + x end
                 local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
-                br[#br + 1] = string.format("csv,simdcsv,native-ram,%d,%.3f,%.3f,%.3f,%.3f,0,0",
-                    mb, q(0.50), q(0.95), vals[1], vals[#vals])
+                br[#br + 1] = string.format("csv,simdcsv,native-ram,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
+                    mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
             end
         end
 
@@ -263,7 +265,7 @@ target("paper_data")
                 local sum = 0
                 for _, x in ipairs(vals) do sum = sum + x end
                 local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
-                br[#br + 1] = string.format("json,cujson,R1-R6+T_in,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
+                br[#br + 1] = string.format("json,cujson,R1-R6+T_in+D2H,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
                     mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
             end
         end

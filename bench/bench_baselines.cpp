@@ -29,6 +29,8 @@ template<class F>
 static std::vector<double> sample(std::size_t bytes, int iters, F&& f) {
 	std::vector<double> g;
 	g.reserve(iters);
+	f();
+	f();  // warm up before timing (allocator / caches / branch predictors)
 	for (int i = 0; i < iters; ++i) {
 		auto a = steady_clock::now();
 		f();
@@ -98,7 +100,9 @@ int main(int argc, char** argv) {
 		}
 		json.push_back(']');
 	}
-	const std::size_t json_mb = (json.size() + (1u << 20) - 1) >> 20;
+	// Label json with the nominal scale (like every other format), not the
+	// ceil() of the slightly-oversized generated file; otherwise json's x-axis
+	// is offset by one (9,17,33,... vs 8,16,32,...).
 	std::string toml;
 	{
 		std::size_t i = 0;
@@ -127,7 +131,7 @@ int main(int argc, char** argv) {
 		// past the end, so passing a bare std::string is undefined behaviour.
 		simdjson::padded_string ps(json.data(), json.size());
 		simdjson::ondemand::parser p;
-		emit("json", "simdjson", json_mb, sample(json.size(), iters, [&] {
+		emit("json", "simdjson", mb, sample(json.size(), iters, [&] {
 				 auto d = p.iterate(ps);
 				 for (auto v : d) (void)v;
 			 }));
