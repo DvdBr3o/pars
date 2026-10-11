@@ -132,14 +132,16 @@ target("pars.bench.boundary")
     add_includedirs("bench")
     set_languages("cxxlatest")
 
--- CSV SOTA baseline (simdcsv) as a standalone binary.
-target("pars.baseline.simdcsv")
-    set_kind("binary")
-    add_files("third_party/simdcsv/main.cpp")
-    add_files("third_party/simdcsv/io_util.cpp")
-    add_includedirs("third_party/simdcsv")
-    add_cxxflags("-march=native", "-include cstdint", {force = true})
-    set_languages("cxxlatest")
+-- CSV SOTA baseline (simdcsv): Linux-only (POSIX unistd.h / mmap).
+if not is_plat("windows") then
+    target("pars.baseline.simdcsv")
+        set_kind("binary")
+        add_files("third_party/simdcsv/main.cpp")
+        add_files("third_party/simdcsv/io_util.cpp")
+        add_includedirs("third_party/simdcsv")
+        add_cxxflags("-march=native", "-include cstdint", {force = true})
+        set_languages("cxxlatest")
+end
 
 -- Benchmark configuration for pars.paper.data (xmake f --scales=... --iters=...).
 option("scales")
@@ -177,7 +179,11 @@ target("pars.bench")
 target("pars.baseline")
     set_kind("phony")
     set_default(false)
-    add_deps("pars.baseline.cujson", "pars.baseline.simdcsv", "pars.baseline.clike")
+    local baseline_deps = {"pars.baseline.cujson", "pars.baseline.clike"}
+    if not is_plat("windows") then
+        table.insert(baseline_deps, "pars.baseline.simdcsv")
+    end
+    add_deps(baseline_deps)
 
 -- Deterministic paper-data generation: builds and runs the benchmarks over a
 -- fixed set of scales/iterations and writes tidy CSVs for the figures.
@@ -185,9 +191,15 @@ target("pars.baseline")
 target("pars.paper.data")
     set_kind("phony")
     set_default(false)
-    add_deps("pars.bench.boundary", "pars.bench.baselines", "pars.baseline.simdcsv",
-             "pars.baseline.clike", "pars.bench.parse", "pars.bench.query",
-             "pars.bench.parse.host", "pars.bench.pointquery", "pars.baseline.cujson")
+    local paper_deps = {
+        "pars.bench.boundary", "pars.bench.baselines", "pars.baseline.clike",
+        "pars.bench.parse", "pars.bench.query", "pars.bench.parse.host",
+        "pars.bench.pointquery", "pars.baseline.cujson",
+    }
+    if not is_plat("windows") then
+        table.insert(paper_deps, "pars.baseline.simdcsv")
+    end
+    add_deps(paper_deps)
     on_build(function (target)
         -- scales/iters come from xmake options (configure with
         --   xmake f --scales=16,64,256 --iters=10
@@ -217,7 +229,7 @@ target("pars.paper.data")
         local pQ = bin("pars.bench.query")
         local pPQ = bin("pars.bench.pointquery")
         local pH = bin("pars.bench.parse.host")
-        local sd = bin("pars.baseline.simdcsv")
+        local sd = (not is_plat("windows")) and bin("pars.baseline.simdcsv") or nil
 
         -- python3 on POSIX, python on Windows.
         local pyp = "python3"
@@ -264,31 +276,33 @@ target("pars.paper.data")
             end
         end
 
-        -- simdcsv on generated files (distribution over `iters` runs)
-        local tmpdir = path.join(root, "build", "paper_csv")
-        os.mkdir(tmpdir)
-        local rec = 'alpha,beta,"quoted, field","has ""q""",42,true\n'
-        for _, mb in ipairs(scales) do
-            local csvfile = path.join(tmpdir, "csv_" .. mb .. ".csv")
-            local py = string.format(
-                "rec=%q\n" .. "t=%d*1024*1024\n" ..
-                "f=open(%q,'w')\n" ..
-                "while f.tell()<t: f.write(rec.replace('\\\\n','\\n'))\n" ..
-                "f.close()\n", rec, mb, csvfile)
-            os.execv(pyp, {"-c", py})
-            local vals = {}
-            for _ = 1, iters do
-                local out = os.iorunv(sd, {"-i", "3", csvfile})
-                local v = out:match("GB/s:%s*([%d%.]+)")
-                if v then vals[#vals + 1] = tonumber(v) end
-            end
-            if #vals > 0 then
-                table.sort(vals)
-                local sum = 0
-                for _, x in ipairs(vals) do sum = sum + x end
-                local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
-                br[#br + 1] = string.format("csv,simdcsv,native-ram,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
-                    mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+        -- simdcsv on generated files (distribution over `iters` runs) — Linux only
+        if sd then
+            local tmpdir = path.join(root, "build", "paper_csv")
+            os.mkdir(tmpdir)
+            local rec = 'alpha,beta,"quoted, field","has ""q""",42,true\n'
+            for _, mb in ipairs(scales) do
+                local csvfile = path.join(tmpdir, "csv_" .. mb .. ".csv")
+                local py = string.format(
+                    "rec=%q\n" .. "t=%d*1024*1024\n" ..
+                    "f=open(%q,'w')\n" ..
+                    "while f.tell()<t: f.write(rec.replace('\\\\n','\\n'))\n" ..
+                    "f.close()\n", rec, mb, csvfile)
+                os.execv(pyp, {"-c", py})
+                local vals = {}
+                for _ = 1, iters do
+                    local out = os.iorunv(sd, {"-i", "3", csvfile})
+                    local v = out:match("GB/s:%s*([%d%.]+)")
+                    if v then vals[#vals + 1] = tonumber(v) end
+                end
+                if #vals > 0 then
+                    table.sort(vals)
+                    local sum = 0
+                    for _, x in ipairs(vals) do sum = sum + x end
+                    local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
+                    br[#br + 1] = string.format("csv,simdcsv,native-ram,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
+                        mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+                end
             end
         end
 

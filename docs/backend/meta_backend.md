@@ -119,3 +119,49 @@ xmake build pars.test.meta.gpu && xmake run pars.test.meta.gpu  # specialized ke
    `struct_out`/`openclose_out` global round-trip.
 3. Specialize `nest` for a single bracket kind and fold it into the pipeline.
 4. Bring `scan_chunk` onto the IR so the chunked path is assembled too.
+
+## User API
+
+`include/pars/parse.cuh` exposes the CUDA-accelerated entry point on top of the
+meta backend:
+
+```cpp
+#include "pars/parse.cuh"
+#include "grammars/json.hpp"
+
+std::string_view buffer = ...;
+auto r = pars<bench::json_grammar>(buffer);                 // structural index
+auto p = pars<bench::json_grammar>(buffer, {.want_pairs=true}); // + bracket pairs
+```
+
+`parse_result` carries `structural` (byte offsets), `pair` (matching-bracket
+index or -1), `balanced`/`well_formed`/`max_depth`, and a `visit(...)` that
+replays the index into a `model::replay` visitor.
+
+`parser<Grammar>` is the same engine with the device-level entry points used by
+the tiered benchmark: `scan_device(d, n, stream, want_pairs, run_pairs, stage_times*)`,
+`scan_chunk(...)`, `reserve(cap)`, `struct_ptr()`.
+
+### Name resolution
+
+The library namespace is `pars`, so the free function `pars` and the namespace
+`pars` collide at global scope.  Inside a scope that declares it, the call reads
+exactly `pars<Grammar>(buffer)`:
+
+```cpp
+namespace {
+using pars::pars;                 // shadows the global `pars` namespace
+auto r = pars<json_grammar>(buf); // unqualified: resolves to the function
+}
+```
+
+Otherwise use the qualified form `pars::pars<Grammar>(buf)` or
+`pars::parser<Grammar>{}(buf)`.  The benchmark files use the shadowing form.
+
+### Toolchain note
+
+`simdjson.h` cannot be included in an `nvcc` translation unit on Windows: CCCL
+requires `/Zc:preprocessor` and simdjson fails under it (MSVC C2382).  simdjson
+baselines are therefore compiled as host files (`bench/host_parse_simdjson.cpp`,
+`bench/host_pointquery.cpp`).
+
