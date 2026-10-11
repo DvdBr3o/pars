@@ -8,7 +8,7 @@
 //
 // Output rows: format,impl,variant,scale_mb,GBps_mean,...,tokens,bytes_moved
 #include "pars/pars.hpp"
-#include "pars/backend/cuda/pipeline.cuh"
+#include "pars/parse.cuh"
 
 #include "grammars/json.hpp"
 
@@ -30,6 +30,8 @@ using namespace pars;
 // The user-defined parser: a JSON DOM builder driven by the replay hook.
 // ---------------------------------------------------------------------------
 namespace {
+
+using pars::pars;	// shadows ::pars so calls read `pars<Grammar>(buffer)`
 
 enum jkind : std::uint8_t { J_OBJ, J_ARR, J_STR, J_NUM, J_TRUE, J_FALSE, J_NULL };
 
@@ -353,17 +355,14 @@ struct json_parser {
 	}
 };
 
-// Parse using the GPU stage-1 + the user hook.
-template<scan_plan S>
-bool pars_parse(
-	gpu::scanner<S>& sc, const std::string& payload, bool want_pairs, json_parser& out
-) {
-	out.base				 = reinterpret_cast<const std::uint8_t*>(payload.data());
-	out.n					 = payload.size();
-	auto				   r = sc.scan_host(out.base, out.n, 0, want_pairs);
+// Parse using the generated parser + the user hook.
+bool pars_parse(const std::string& payload, bool want_pairs, json_parser& out) {
+	out.base = reinterpret_cast<const std::uint8_t*>(payload.data());
+	out.n	 = payload.size();
+	auto				   r  = pars<bench::json_grammar>(payload, parse_options {want_pairs});
 	model::structural_view sv;
 	sv.pos	= r.structural.data();
-	sv.pair = (want_pairs && !r.pair_pos.empty()) ? r.pair_pos.data() : nullptr;
+	sv.pair = r.pair.empty() ? nullptr : r.pair.data();
 	sv.n	= r.structural.size();
 	model::replay(out.base, out.n, sv, out);
 	out.finish();
@@ -433,12 +432,9 @@ int main(int argc, char** argv) {
 		json.push_back(']');
 	}
 
-	constexpr auto	 kJ = compile::make_scan_plan<bench::json_grammar>();
-	gpu::scanner<kJ> g;
-
 	// --- correctness: our hook-driven parser vs the events it must consume ---
 	json_parser check;
-	const bool	ok_full = pars_parse<kJ>(g, json, /*want_pairs=*/true, check);
+	const bool	ok_full = pars_parse(json, /*want_pairs=*/true, check);
 	std::fprintf(
 		stderr,
 		"[parse] json ok=%d nodes=%llu hash=%llx\n",
@@ -465,7 +461,7 @@ int main(int argc, char** argv) {
 				iters,
 				[&] {
 					pbench.reset();
-					(void)pars_parse<kJ>(g, json, /*want_pairs=*/false, pbench);
+					(void)pars_parse(json, /*want_pairs=*/false, pbench);
 				}
 			),
 			tokens,

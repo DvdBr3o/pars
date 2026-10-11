@@ -9,7 +9,7 @@
 // The iterator below is JSON-specific (the user's job); the framework only
 // supplies the structural cursor (pars/model/cursor.hpp).
 #include "pars/pars.hpp"
-#include "pars/backend/cuda/pipeline.cuh"
+#include "pars/parse.cuh"
 
 #include "grammars/json.hpp"
 
@@ -26,6 +26,13 @@ using namespace std::chrono;
 using namespace pars;
 
 namespace {
+
+using pars::pars;	// shadows ::pars so calls read `pars<Grammar>(buffer)`
+
+template<class Grammar>
+parse_result run_parse(std::string_view s, bool pairs = false) {
+	return pars<Grammar>(s, parse_options {pairs});
+}
 
 using model::structural_cursor;
 using model::trim;
@@ -175,15 +182,13 @@ int main(int argc, char** argv) {
 	}
 	json += ']';
 
-	constexpr auto		kJ = compile::make_scan_plan<bench::json_grammar>();
-	gpu::scanner<kJ>	g;
 	const std::uint8_t* base = reinterpret_cast<const std::uint8_t*>(json.data());
 
 	// One scan to obtain the host-side structural index (+ bracket partners).
-	auto					 hr = g.scan_host(base, json.size(), 0, /*want_pairs=*/true);
+	auto					 hr = run_parse<bench::json_grammar>(json, /*want_pairs=*/true);
 	model::structural_cursor cur;
 	cur.pos	 = hr.structural.data();
-	cur.pair = hr.pair_pos.data();
+	cur.pair = hr.pair.empty() ? nullptr : hr.pair.data();
 	cur.base = base;
 	cur.n	 = hr.structural.size();
 
@@ -199,7 +204,7 @@ int main(int argc, char** argv) {
 	);
 
 	const double		parse_g = mean(sample(json.size(), iters, [&] {
-		auto r = g.scan_host(base, json.size(), 0, /*want_pairs=*/true);
+		auto r = run_parse<bench::json_grammar>(json, /*want_pairs=*/true);
 		if (r.structural.empty())
 			std::fprintf(stderr, "empty\n");
 	}));

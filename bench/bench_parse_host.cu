@@ -6,7 +6,7 @@
 // values and builds a map/tree.  Everything format specific lives here; the
 // framework only provides the structural index + the replay hook.
 #include "pars/pars.hpp"
-#include "pars/backend/cuda/pipeline.cuh"
+#include "pars/parse.cuh"
 
 #include "grammars/toml.hpp"
 #include "grammars/ini.hpp"
@@ -26,6 +26,13 @@ using namespace std::chrono;
 using namespace pars;
 
 namespace {
+
+using pars::pars;	// shadows ::pars so calls read `pars<Grammar>(buffer)`
+
+template<class Grammar>
+parse_result run_parse(std::string_view s, bool pairs = false) {
+	return pars<Grammar>(s, parse_options {pairs});
+}
 
 bool is_ws(std::uint8_t c) {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r';
@@ -321,6 +328,9 @@ int main(int argc, char** argv) {
 	constexpr auto	  kT	 = compile::make_scan_plan<bench::toml_grammar>();
 	constexpr auto	  kI	 = compile::make_scan_plan<bench::ini_grammar>();
 	constexpr auto	  kX	 = compile::make_scan_plan<bench::xml_grammar>();
+	(void)kT;
+	(void)kI;
+	(void)kX;
 
 	const std::size_t recs_t = count_sub(toml, "[server]");
 	const std::size_t recs_i = count_sub(ini, "[section]");
@@ -329,9 +339,8 @@ int main(int argc, char** argv) {
 	toml_parse		  tp;
 	(void)tp;
 	{
-		gpu::scanner<kT>	   g;
 		const std::uint8_t*	   base = reinterpret_cast<const std::uint8_t*>(toml.data());
-		auto				   hr	= g.scan_host(base, toml.size(), 0, false);
+		auto				   hr	= run_parse<bench::toml_grammar>(toml, false);
 		model::structural_view sv {hr.structural.data(), nullptr, hr.structural.size()};
 		toml_parse			   p0 {};
 		p0.base = base;
@@ -360,9 +369,8 @@ int main(int argc, char** argv) {
 		);
 	}
 	{
-		gpu::scanner<kI>	   g;
 		const std::uint8_t*	   base = reinterpret_cast<const std::uint8_t*>(ini.data());
-		auto				   hr	= g.scan_host(base, ini.size(), 0, false);
+		auto				   hr	= run_parse<bench::ini_grammar>(ini, false);
 		model::structural_view sv {hr.structural.data(), nullptr, hr.structural.size()};
 		ini_parse			   p0 {};
 		p0.base = base;
@@ -391,9 +399,8 @@ int main(int argc, char** argv) {
 		);
 	}
 	{
-		gpu::scanner<kX>	   g;
 		const std::uint8_t*	   base = reinterpret_cast<const std::uint8_t*>(xml.data());
-		auto				   hr	= g.scan_host(base, xml.size(), 0, false);
+		auto				   hr	= run_parse<bench::xml_grammar>(xml, false);
 		model::structural_view sv {hr.structural.data(), nullptr, hr.structural.size()};
 		xml_parse			   p0 {};
 		p0.base = base;

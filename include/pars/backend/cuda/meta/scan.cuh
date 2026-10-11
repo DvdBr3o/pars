@@ -63,7 +63,7 @@ inline void compact_p3(
 template<scan_plan S>
 inline device_result scan_device_meta(
 	const std::uint8_t* d_in, std::size_t size, detail::DeviceCache& b, bool want_pairs,
-	cudaStream_t s = 0
+	bool run_pairs = true, stage_times* st = nullptr, cudaStream_t s = 0
 ) {
 	using P = pars::meta::rewritten_pipeline_t<S>;
 	if constexpr (is_parity_pipeline<P, S>::value && S.n_brackets == 0) {
@@ -76,21 +76,41 @@ inline device_result scan_device_meta(
 		const int		  grid	  = (n_words + BLOCK - 1) / BLOCK;
 		b.ensure_words(n_words, padded);
 
-		emit_head<scan_plan::lex_kind::doubled, S>::run(
-			b, d_in, size, n_words, grid, s
-		);
+		cudaEvent_t ev[3] {};
+		if (st)
+			for (int i = 0; i < 3; ++i) cudaEventCreate(&ev[i]);
+		auto mark = [&](int i) {
+			if (st)
+				cudaEventRecord(ev[i], s);
+		};
+		mark(0);
+		emit_head<scan_plan::lex_kind::doubled, S>::run(b, d_in, size, n_words, grid, s);
+		mark(1);
 
 		std::uint32_t n_struct = 0, n_oc = 0;
 		compact_p3<S>(b, d_in, n_words, grid, s, n_struct, n_oc);
+		mark(2);
 
 		out.structural = b.struct_idx;
 		out.pair_pos   = nullptr;
 		out.n_struct   = n_struct;
 		out.balanced = out.well_formed = true;
 		out.max_depth				   = 0;
+
+		if (st) {
+			cudaEventSynchronize(ev[2]);
+			float ms = 0;
+			st->p1	 = 0;
+			cudaEventElapsedTime(&ms, ev[0], ev[1]);
+			st->p2 = ms;
+			cudaEventElapsedTime(&ms, ev[1], ev[2]);
+			st->p3 = ms;
+			st->p4 = 0;
+			for (int i = 0; i < 3; ++i) cudaEventDestroy(ev[i]);
+		}
 		return out;
 	} else {
-		return scan_device_impl<S>(d_in, size, b, want_pairs, true, nullptr, s);
+		return scan_device_impl<S>(d_in, size, b, want_pairs, run_pairs, st, s);
 	}
 }
 
@@ -108,7 +128,7 @@ inline host_result scan_host_meta(const std::uint8_t* h_data, std::size_t n, cud
 		std::memset(pin + n, 0, padded - n);
 	cudaMemcpyAsync(dev, pin, padded, cudaMemcpyHostToDevice, s);
 	device_result dr =
-		scan_device_meta<S>(dev, n, b, false, s);
+		scan_device_meta<S>(dev, n, b, false, true, nullptr, s);
 	host_result out;
 	out.balanced	= dr.balanced;
 	out.well_formed = dr.well_formed;

@@ -10,7 +10,7 @@
 //
 // Output: format,impl,scale_mb,query_ns,ok
 #include "pars/pars.hpp"
-#include "pars/backend/cuda/pipeline.cuh"
+#include "pars/parse.cuh"
 
 #include "grammars/json.hpp"
 #include "grammars/toml.hpp"
@@ -42,6 +42,13 @@ using namespace std::chrono;
 using namespace pars;
 
 namespace {
+
+using pars::pars;	// shadows ::pars so calls read `pars<Grammar>(buffer)`
+
+template<class Grammar>
+parse_result run_parse(std::string_view s, bool pairs = false) {
+	return pars<Grammar>(s, parse_options {pairs});
+}
 
 volatile std::uint64_t g_sink = 0;	// defeats hoisting/dead-code elimination
 
@@ -149,11 +156,6 @@ int main(int argc, char** argv) {
 	const int		  reps	 = argc > 2 ? std::atoi(argv[2]) : 2000;
 	const std::size_t target = mb * 1024 * 1024;
 
-	constexpr auto	  kJ	 = compile::make_scan_plan<bench::json_grammar>();
-	constexpr auto	  kT	 = compile::make_scan_plan<bench::toml_grammar>();
-	constexpr auto	  kI	 = compile::make_scan_plan<bench::ini_grammar>();
-	constexpr auto	  kX	 = compile::make_scan_plan<bench::xml_grammar>();
-
 	// ---------------- JSON: first record's "id" ----------------
 	{
 		const std::string rec =
@@ -167,9 +169,8 @@ int main(int argc, char** argv) {
 		}
 		doc.push_back(']');
 
-		gpu::scanner<kJ>		 g;
 		const std::uint8_t*		 base = reinterpret_cast<const std::uint8_t*>(doc.data());
-		auto					 hr	  = g.scan_host(base, doc.size(), 0, false);
+		auto					 hr	  = run_parse<bench::json_grammar>(doc, false);
 		model::structural_cursor c {hr.structural.data(), nullptr, base, hr.structural.size()};
 		bool					 ok = false;
 		std::string_view		 v	= pars_nav(c, ':', "id", ok);
@@ -202,9 +203,8 @@ int main(int argc, char** argv) {
 	{
 		std::string doc =
 			repeat("[section]\nkey = value\nnum = 123\n; comment\nother = x\n", target);
-		gpu::scanner<kI>		 g;
 		const std::uint8_t*		 base = reinterpret_cast<const std::uint8_t*>(doc.data());
-		auto					 hr	  = g.scan_host(base, doc.size(), 0, false);
+		auto					 hr	  = run_parse<bench::ini_grammar>(doc, false);
 		model::structural_cursor c {hr.structural.data(), nullptr, base, hr.structural.size()};
 		bool					 ok = false;
 		std::string_view		 v	= pars_nav(c, '=', "num", ok);
@@ -240,9 +240,8 @@ int main(int argc, char** argv) {
 			doc += "[t" + std::to_string(i)
 				 + "]\nhost = \"localhost\"\nport = 8080\n"
 				   "name = 'a # b'\narr = [1, 2, 3]\n";
-		gpu::scanner<kT>		 g;
 		const std::uint8_t*		 base = reinterpret_cast<const std::uint8_t*>(doc.data());
-		auto					 hr	  = g.scan_host(base, doc.size(), 0, false);
+		auto					 hr	  = run_parse<bench::toml_grammar>(doc, false);
 		model::structural_cursor c {hr.structural.data(), nullptr, base, hr.structural.size()};
 		bool					 ok = false;
 		std::string_view		 v	= pars_nav(c, '=', "port", ok);
@@ -277,9 +276,8 @@ int main(int argc, char** argv) {
 		std::string		  doc  = "<root>";
 		while (doc.size() < target) doc += item;
 		doc += "</root>";
-		gpu::scanner<kX>		 g;
 		const std::uint8_t*		 base = reinterpret_cast<const std::uint8_t*>(doc.data());
-		auto					 hr	  = g.scan_host(base, doc.size(), 0, false);
+		auto					 hr	  = run_parse<bench::xml_grammar>(doc, false);
 		model::structural_cursor c {hr.structural.data(), nullptr, base, hr.structural.size()};
 		bool					 ok = false;
 		std::string_view		 v	= pars_nav(c, '=', "id", ok);

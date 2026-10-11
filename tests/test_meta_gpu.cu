@@ -1,7 +1,9 @@
-// tests/test_meta_gpu.cu — validate the meta backend (rewrite + specialized
-// kernels) against the CPU reference scanner.  CSV exercises the fused parity
-// head end-to-end; JSON confirms the fallback delegation still matches.
-#include "pars/backend/cuda/meta/scan.cuh"
+// tests/test_meta_gpu.cu — the user-facing API `pars<Grammar>(buffer)`.
+//
+// Validates the CUDA-accelerated entry point against the CPU reference scanner:
+// CSV exercises the fused parity head end-to-end; JSON exercises the delegated
+// path with bracket pairing.
+#include "pars/parse.cuh"
 #include "pars/pars.hpp"
 
 #include "../bench/grammars/csv.hpp"
@@ -13,14 +15,19 @@
 
 using namespace pars;
 
-template<scan_plan S>
-static bool check(const std::string& s, const char* name) {
+namespace {
+// `using pars::pars` shadows the global `pars` namespace in this scope, so the
+// call reads exactly `pars<Grammar>(buffer)`.
+using pars::pars;
+
+template<class Grammar>
+bool check(const std::string& s, const char* name, bool want_pairs) {
+	constexpr auto	  S = compile::make_scan_plan<Grammar>();
 	model::scanner<S> cpu;
 	auto			  c = cpu.scan(s);
-	auto			  r = gpu::meta::scan_host_meta<S>(
-		 reinterpret_cast<const std::uint8_t*>(s.data()),
-		 s.size()
-	 );
+
+	auto r = pars<Grammar>(s, parse_options {want_pairs});
+
 	bool ok = c.positions.size() == r.structural.size();
 	if (ok) {
 		for (std::size_t i = 0; i < c.positions.size(); ++i)
@@ -30,19 +37,19 @@ static bool check(const std::string& s, const char* name) {
 			}
 	}
 	std::printf(
-		"[meta-gpu] %-4s cpu=%zu meta=%zu ok=%d\n",
+		"[api] %-4s cpu=%zu api=%zu pairs=%zu ok=%d\n",
 		name,
 		c.positions.size(),
 		r.structural.size(),
+		r.pair.size(),
 		(int)ok
 	);
 	return ok;
 }
 
-int main() {
-	constexpr auto kJ = compile::make_scan_plan<bench::json_grammar>();
-	constexpr auto kC = compile::make_scan_plan<bench::csv_grammar>();
+}  // namespace
 
+int main() {
 	std::string csv;
 	const char* rec = "alpha,beta,\"quoted, field\",\"has \"\"q\"\"\",42,true\n";
 	for (int i = 0; i < 2000; ++i) csv += rec;
@@ -57,8 +64,8 @@ int main() {
 	json += "]";
 
 	bool ok = true;
-	ok &= check<kC>(csv, "csv");
-	ok &= check<kJ>(json, "json");
-	std::printf("[meta-gpu] %s\n", ok ? "ALL PASS" : "FAIL");
+	ok &= check<bench::csv_grammar>(csv, "csv", false);
+	ok &= check<bench::json_grammar>(json, "json", true);
+	std::printf("[api] %s\n", ok ? "ALL PASS" : "FAIL");
 	return ok ? 0 : 1;
 }

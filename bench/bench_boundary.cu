@@ -3,10 +3,14 @@
 //   N1a  device-resident stage-1 (P1-P3)      N1b  +P4 bracket pairing
 //   N3   host boundary (pinned+async)          N3c  chunked overlap (parity path)
 //
+// Everything goes through the new user API: `parser<Grammar>` (device tiers)
+// and `pars<Grammar>(buffer)` (host tier), which lower the grammar's scan plan
+// through the meta IR + rewrite pipeline.
+//
 // Output (one row per format x tier), p50/p95 over `iters` full scans:
 //   format,impl,variant,scale_mb,GBps_p50,GBps_p95,GBps_min,GBps_max,tokens,bytes_moved
+#include "pars/parse.cuh"
 #include "pars/pars.hpp"
-#include "pars/backend/cuda/pipeline.cuh"
 
 #include "grammars/json.hpp"
 #include "grammars/csv.hpp"
@@ -27,6 +31,10 @@
 
 using namespace std::chrono;
 using namespace pars;
+
+namespace {
+// Shadow the global `pars` namespace so the call reads `pars<Grammar>(buffer)`.
+using pars::pars;
 
 static double gbps(std::size_t bytes, double s) {
 	return (double)bytes / s / 1e9;
@@ -106,12 +114,12 @@ static void hardware_facts(std::size_t n) {
 	cudaFreeHost(hp);
 }
 
-template<scan_plan S>
+template<class Grammar>
 static bool validate(const std::string& s) {
+	constexpr auto	  S = parser<Grammar>::kPlan;
 	model::scanner<S> cpu;
 	auto			  c = cpu.scan(s);
-	gpu::scanner<S>	  g;
-	auto			  r = g.scan_host(reinterpret_cast<const std::uint8_t*>(s.data()), s.size());
+	auto			  r = pars<Grammar>(s, parse_options {});
 	if (c.positions.size() != r.structural.size())
 		return false;
 	for (std::size_t i = 0; i < c.positions.size(); ++i)
@@ -120,19 +128,19 @@ static bool validate(const std::string& s) {
 	return true;
 }
 
-template<scan_plan S>
+template<class Grammar>
 static bool validate_random(const char* alphabet, std::size_t n, unsigned seed) {
 	std::mt19937	  rng(seed);
 	const std::size_t A = std::strlen(alphabet);
 	std::string		  s(n, ' ');
 	for (char& c : s) c = alphabet[rng() % A];
-	return validate<S>(s);
+	return validate<Grammar>(s);
 }
 
 // Overlapped chunked host path (parity path only).
-template<scan_plan S>
+template<class Grammar>
 static std::vector<double> sample_chunked(
-	gpu::scanner<S>& sc, const std::string& payload, int iters, int nchunks, std::size_t& moved,
+	parser<Grammar>& sc, const std::string& payload, int iters, int nchunks, std::size_t& moved,
 	std::uint32_t& tokens
 ) {
 	const std::size_t n	  = payload.size();
@@ -143,7 +151,7 @@ static std::vector<double> sample_chunked(
 	std::uint8_t*	  dev[2] = {nullptr, nullptr};
 	cudaMalloc(&dev[0], chunk);
 	cudaMalloc(&dev[1], chunk);
-	sc.reserve_struct(n);
+	sc.reserve(n);
 	cudaStream_t s0, s1;
 	cudaStreamCreate(&s0);
 	cudaStreamCreate(&s1);
@@ -194,6 +202,7 @@ static std::vector<double> sample_chunked(
 		cudaMemcpy(hout, sc.struct_ptr(), (std::size_t)tokens * 4, cudaMemcpyDeviceToHost);
 	}
 	// correctness of chunking vs CPU
+	constexpr auto	  S = parser<Grammar>::kPlan;
 	model::scanner<S> cpu;
 	auto			  c	 = cpu.scan(payload);
 	bool			  ok = (c.positions.size() == (std::size_t)tokens);
@@ -217,18 +226,18 @@ static std::vector<double> sample_chunked(
 	return g;
 }
 
-template<scan_plan S>
+template<class Grammar>
 static void bench_format(
 	const char* fmt, const std::string& payload, const char* alphabet, std::size_t mb, int iters
 ) {
-	const bool ok_full = validate<S>(payload);
-	const bool ok_rand = validate_random<S>(alphabet, 1 << 20, 12345u)
-					  && validate_random<S>(alphabet, 1 << 20, 999u);
+	const bool ok_full = validate<Grammar>(payload);
+	const bool ok_rand = validate_random<Grammar>(alphabet, 1 << 20, 12345u)
+					  && validate_random<Grammar>(alphabet, 1 << 20, 999u);
 	std::fprintf(stderr, "[validate] %s full=%d random=%d\n", fmt, (int)ok_full, (int)ok_rand);
 
 	const std::size_t n		 = payload.size();
 	const std::size_t padded = (n + 31) / 32 * 32;
-	gpu::scanner<S>	  g;
+	parser<Grammar>	  g;
 	std::uint8_t*	  dp = nullptr;
 	cudaMalloc(&dp, padded);
 	cudaMemcpy(dp, payload.data(), n, cudaMemcpyHostToDevice);
@@ -287,8 +296,7 @@ static void bench_format(
 			n,
 			iters,
 			[&] {
-				auto r =
-					g.scan_host(reinterpret_cast<const std::uint8_t*>(payload.data()), n, 0, false);
+				auto r = pars<Grammar>(payload, parse_options {});
 				(void)r;
 			}
 		),
@@ -300,10 +308,12 @@ static void bench_format(
 	{
 		std::size_t	  moved = 0;
 		std::uint32_t tk	= 0;
-		auto		  g3	= sample_chunked<S>(g, payload, iters, 16, moved, tk);
+		auto		  g3	= sample_chunked<Grammar>(g, payload, iters, 16, moved, tk);
 		emit(fmt, "pars", "N3c", mb, g3, tk, moved);
 	}
 }
+
+}  // namespace
 
 int main(int argc, char** argv) {
 	const std::size_t mb	 = argc > 1 ? (std::size_t)std::atol(argv[1]) : 64;
@@ -336,21 +346,14 @@ int main(int argc, char** argv) {
 		repeat_rec("[section]\nkey = value\nnum = 123\n; comment\nother = x\n", target);
 	std::string	   xml = repeat_rec("<item id=\"1\" name=\"x &amp; y\">alpha</item>", target);
 
-	constexpr auto kJ  = compile::make_scan_plan<bench::json_grammar>();
-	constexpr auto kC  = compile::make_scan_plan<bench::csv_grammar>();
-	constexpr auto kT  = compile::make_scan_plan<bench::toml_grammar>();
-	constexpr auto kL  = compile::make_scan_plan<bench::clike_grammar>();
-	constexpr auto kI  = compile::make_scan_plan<bench::ini_grammar>();
-	constexpr auto kX  = compile::make_scan_plan<bench::xml_grammar>();
-
 	std::printf(
 		"# format,impl,variant,scale_mb,GBps_mean,GBps_p50,GBps_p95,GBps_min,GBps_max,tokens,bytes_moved\n"
 	);
-	bench_format<kJ>("json", json, "{}[]:,\"\\0123456789tfn.-eE \n", mb, iters);
-	bench_format<kC>("csv", csv, ",.\n\r\"abc0123 ", mb, iters);
-	bench_format<kT>("toml", toml, "[]{}.,=\"'#\nabc0123 \n", mb, iters);
-	bench_format<kL>("clike", clike, "{};/*\n abc123", mb, iters);
-	bench_format<kI>("ini", ini, "[]=;\n abc0123", mb, iters);
-	bench_format<kX>("xml", xml, "<>/=?!\"' ab0123", mb, iters);
+	bench_format<bench::json_grammar>("json", json, "{}[]:,\"\\0123456789tfn.-eE \n", mb, iters);
+	bench_format<bench::csv_grammar>("csv", csv, ",.\n\r\"abc0123 ", mb, iters);
+	bench_format<bench::toml_grammar>("toml", toml, "[]{}.,=\"'#\nabc0123 \n", mb, iters);
+	bench_format<bench::clike_grammar>("clike", clike, "{};/*\n abc123", mb, iters);
+	bench_format<bench::ini_grammar>("ini", ini, "[]=;\n abc0123", mb, iters);
+	bench_format<bench::xml_grammar>("xml", xml, "<>/=?!\"' ab0123", mb, iters);
 	return 0;
 }
