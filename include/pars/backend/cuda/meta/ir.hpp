@@ -46,13 +46,12 @@ struct head_plain {};
 // and the single delimiter, which is all the fused head needs.
 // ---------------------------------------------------------------------------
 struct head_spec_t {
-	std::array<char, 8> punct {};
-	std::array<char, 8> open {};
-	std::array<char, 8> close {};
-	std::uint8_t		n_punct	   = 0;
-	std::uint8_t		n_brackets = 0;
-	char				delim	   = 0;
-	friend constexpr bool operator==(const head_spec_t&, const head_spec_t&) = default;
+	char		 punct[8] = {};
+	char		 open[8]  = {};
+	char		 close[8] = {};
+	std::uint8_t n_punct	= 0;
+	std::uint8_t n_brackets = 0;
+	char		 delim		= 0;
 };
 
 template<scan_plan S>
