@@ -50,8 +50,8 @@ pars stage-1（N1a）与基线，随输入规模：
 ## 复现
 
 ```bash
-xmake build pars_bench_baselines && ./build/.../pars_bench_baselines <MB> <iters>
-xmake build pars_bench_gpu       && ./build/.../pars_bench_gpu <MB> <iters>
+xmake build pars.bench.baselines && ./build/.../pars.bench.baselines <MB> <iters>
+xmake build pars.bench.boundary  && ./build/.../pars.bench.boundary  <MB> <iters>
 # CSV 基线：third_party/simdcsv（见 README）
 ```
 

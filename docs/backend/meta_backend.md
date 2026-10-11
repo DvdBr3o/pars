@@ -96,19 +96,19 @@ target.
 
 | Item | State |
 |---|---|
-| IR + rewrite engine | done (`meta/ir.hpp`, `meta/rewrite.hpp`), asserted in `pars_meta_tests` |
+| IR + rewrite engine | done (`meta/ir.hpp`, `meta/rewrite.hpp`), asserted in `pars.test.meta` |
 | Frozen head fusion (parity) | done, end-to-end on CSV |
 | Fused head for affine / table policies | **not yet** — delegates to `scan_device_impl` |
 | Fused `compact` (block scan in the head) | **not yet** |
 | `nest` specialization (single-bracket unroll) | **not yet** |
 | chunk carry through the pipeline | **not yet** |
-| correctness vs CPU | CSV (specialized) and JSON (delegated) both pass (`pars_meta_gpu`) |
+| correctness vs CPU | CSV (specialized) and JSON (delegated) both pass (`pars.test.meta.gpu`) |
 
 ## Build & run
 
 ```bash
-xmake build pars_meta_tests && xmake run pars_meta_tests    # IR + rewrite asserts
-xmake build pars_meta_gpu   && xmake run pars_meta_gpu      # specialized kernels vs CPU
+xmake build pars.test.meta && xmake run pars.test.meta          # IR + rewrite asserts
+xmake build pars.test.meta.gpu && xmake run pars.test.meta.gpu  # specialized kernels vs CPU
 ```
 
 ## Next steps

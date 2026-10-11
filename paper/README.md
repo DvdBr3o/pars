@@ -92,9 +92,9 @@ uv — no `requirements.txt`.
 ## Regenerating benchmark data (deterministic, via xmake)
 
 ```bash
-xmake build paper_data                 # scales/iters from xmake options
+xmake build pars.paper.data            # scales/iters from xmake options
 xmake f --scales=16,64,256 --iters=10  # full run
-xmake build paper_data
+xmake build pars.paper.data
 ```
 
 This writes `paper/plots/data/{pars,baselines,stages}.csv`.  No environment

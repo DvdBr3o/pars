@@ -42,9 +42,9 @@ tests/test_model.cpp
 ## Build & run
 
 ```bash
-xmake build pars_tests && xmake run pars_tests
-xmake build pars_bench_gpu && xmake run pars_bench_gpu      # CUDA throughput
-xmake build pars_bench && xmake run pars_bench              # CPU throughput
+xmake build pars.test && xmake run pars.test.model          # correctness
+xmake build pars.bench.boundary && xmake run pars.bench.boundary   # CUDA throughput
+xmake build pars.bench.scan && xmake run pars.bench.scan           # CPU throughput
 ```
 
 ## Status
