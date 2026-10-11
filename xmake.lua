@@ -104,13 +104,16 @@ target("pars.bench.pointquery")
     set_languages("cxxlatest")
 
 -- cuJSON (GPU JSON) reference baseline, reproduced and patched for CUDA 13/CCCL.
-target("pars.baseline.cujson")
-    set_kind("binary")
-    add_cugencodes("native")
-    add_rules("cccl_msvc")
-    add_files("third_party/cujson/reproduced/cuJSON-standardjson-total-parsing.cu")
-    set_languages("cxxlatest")
-    add_cuflags("-w", {force = true})
+-- Linux-only (uses x86intrin.h).
+if not is_plat("windows") then
+    target("pars.baseline.cujson")
+        set_kind("binary")
+        add_cugencodes("native")
+        add_rules("cccl_msvc")
+        add_files("third_party/cujson/reproduced/cuJSON-standardjson-total-parsing.cu")
+        set_languages("cxxlatest")
+        add_cuflags("-w", {force = true})
+end
 
 -- Host query tier (GPU stage-1 + lazy user iterator): Parsing / Query / Total.
 target("pars.bench.query")
@@ -182,8 +185,9 @@ target("pars.bench")
 target("pars.baseline")
     set_kind("phony")
     set_default(false)
-    local baseline_deps = {"pars.baseline.cujson"}
+    local baseline_deps = {}
     if not is_plat("windows") then
+        table.insert(baseline_deps, "pars.baseline.cujson")
         table.insert(baseline_deps, "pars.baseline.simdcsv")
         table.insert(baseline_deps, "pars.baseline.clike")
     end
@@ -198,11 +202,12 @@ target("pars.paper.data")
     local paper_deps = {
         "pars.bench.boundary", "pars.bench.baselines",
         "pars.bench.parse", "pars.bench.query", "pars.bench.parse.host",
-        "pars.bench.pointquery", "pars.baseline.cujson",
+        "pars.bench.pointquery",
     }
     if not is_plat("windows") then
         table.insert(paper_deps, "pars.baseline.simdcsv")
         table.insert(paper_deps, "pars.baseline.clike")
+        table.insert(paper_deps, "pars.baseline.cujson")
     end
     add_deps(paper_deps)
     on_build(function (target)
@@ -323,39 +328,42 @@ target("pars.paper.data")
 
         -- cuJSON (GPU JSON) reference: H2D + validation + Tokenize + Parser
         -- (their published TOTAL excludes D2H).  Variant encodes the interval.
-        local cj = bin("pars.baseline.cujson")
-        local jdir = path.join(root, "build", "paper_json")
-        os.mkdir(jdir)
-        -- cuJSON Figure 9 (Standard JSON): match scripts/run_cujson_fig9.sh —
-        -- 10 fresh runs, average, parse the last number.  The same source file
-        -- (src/reproduced/cuJSON-standardjson-total-parsing.cu) is used.
-        local cujson_reps = 10
-        for _, mb in ipairs(scales) do
-            local jf
-            if dataset ~= "" then
-                jf = dataset
-            else
-                jf = path.join(jdir, "json_" .. mb .. ".json")
-                os.execv(
-                    pyp, {path.join(root, "bench", "gen_json.py"), tostring(mb), jf}
-                )
-            end
-            local vals = {}
-            for _ = 1, cujson_reps do
-                local out = os.iorunv(cj, {"-b", jf})
-                -- cuJSON default = its own Fig.9 interval (no D2H).
-                local nod = tonumber(out:match("CUJSON_NO_D2H%s*([%d%.]+)"))
-                if nod and nod > 0 then
-                    vals[#vals + 1] = (mb * 1024.0 * 1024.0) / (nod / 1e3) / 1e9
+        -- Linux only.
+        local cj = (not is_plat("windows")) and bin("pars.baseline.cujson") or nil
+        if cj then
+            local jdir = path.join(root, "build", "paper_json")
+            os.mkdir(jdir)
+            -- cuJSON Figure 9 (Standard JSON): match scripts/run_cujson_fig9.sh —
+            -- 10 fresh runs, average, parse the last number.  The same source file
+            -- (src/reproduced/cuJSON-standardjson-total-parsing.cu) is used.
+            local cujson_reps = 10
+            for _, mb in ipairs(scales) do
+                local jf
+                if dataset ~= "" then
+                    jf = dataset
+                else
+                    jf = path.join(jdir, "json_" .. mb .. ".json")
+                    os.execv(
+                        pyp, {path.join(root, "bench", "gen_json.py"), tostring(mb), jf}
+                    )
                 end
-            end
-            if #vals > 0 then
-                table.sort(vals)
-                local sum = 0
-                for _, x in ipairs(vals) do sum = sum + x end
-                local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
-                br[#br + 1] = string.format("json,cujson,R1-R6+T_in,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
-                    mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+                local vals = {}
+                for _ = 1, cujson_reps do
+                    local out = os.iorunv(cj, {"-b", jf})
+                    -- cuJSON default = its own Fig.9 interval (no D2H).
+                    local nod = tonumber(out:match("CUJSON_NO_D2H%s*([%d%.]+)"))
+                    if nod and nod > 0 then
+                        vals[#vals + 1] = (mb * 1024.0 * 1024.0) / (nod / 1e3) / 1e9
+                    end
+                end
+                if #vals > 0 then
+                    table.sort(vals)
+                    local sum = 0
+                    for _, x in ipairs(vals) do sum = sum + x end
+                    local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
+                    br[#br + 1] = string.format("json,cujson,R1-R6+T_in,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
+                        mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+                end
             end
         end
 
