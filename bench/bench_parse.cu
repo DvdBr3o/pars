@@ -12,8 +12,6 @@
 
 #include "grammars/json.hpp"
 
-#include <simdjson.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -25,6 +23,10 @@
 
 using namespace std::chrono;
 using namespace pars;
+
+// simdjson DOM baseline lives in bench/host_parse_simdjson.cpp (host-only) so
+// nvcc never parses simdjson.h.
+extern "C" void bp_json_simdjson(const char* data, std::size_t n, int iters, std::size_t mb);
 
 // ---------------------------------------------------------------------------
 // The user-defined parser: a JSON DOM builder driven by the replay hook.
@@ -470,29 +472,7 @@ int main(int argc, char** argv) {
 	}
 
 	// --- simdjson: full DOM parse (builds the tape), then consume it ---
-	{
-		simdjson::dom::parser p;
-		uint64_t			  sink = 0;
-		emit(
-			"json",
-			"simdjson",
-			"P",
-			mb,
-			sample(
-				json.size(),
-				iters,
-				[&] {
-					simdjson::dom::element root;
-					if (p.parse(json).get(root))
-						return;
-					simdjson::dom::array arr = root.get_array();
-					for (auto v : arr) sink += static_cast<std::uint64_t>(v.type());
-				}
-			),
-			0,
-			json.size()
-		);
-		(void)sink;
-	}
+	// (host-only; see host_parse_simdjson.cpp)
+	bp_json_simdjson(json.data(), json.size(), iters, mb);
 	return 0;
 }

@@ -7,11 +7,10 @@ add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_requires("simdjson", "toml++", "pugixml", "inih")
 
 -- CUDA 13.x ships CCCL/Thrust that requires MSVC's conforming preprocessor.
--- The meta backend also indexes the constexpr plan arrays from device code,
--- which needs relaxed constexpr.  Apply to every CUDA target.
+-- Apply to every CUDA target.  (simdjson cannot be mixed into an nvcc TU under
+-- /Zc:preprocessor, so simdjson baselines are compiled as host files.)
 rule("cccl_msvc")
     on_load(function (target)
-        target:add("cuflags", "--expt-relaxed-constexpr", {force = true})
         if is_plat("windows") then
             target:add("cuflags", "-Xcompiler=/Zc:preprocessor", {force = true})
         end
@@ -77,6 +76,7 @@ target("pars.bench.parse")
     add_cugencodes("native")
     add_rules("cccl_msvc")
     add_files("bench/bench_parse.cu")
+    add_files("bench/host_parse_simdjson.cpp")
     add_packages("simdjson")
     add_includedirs("bench")
     set_languages("cxxlatest")
@@ -204,17 +204,27 @@ target("pars.paper.data")
             scales = {math.max(1, math.ceil(os.filesize(dataset) / (1024 * 1024)))}
         end
         local root = os.projectdir()
-        local bind = path.join(root, "build", "linux", "x86_64", "release")
         local outdir = path.join(root, "paper", "plots", "data")
         os.mkdir(outdir)
 
-        local pG = path.join(bind, "pars.bench.boundary")
-        local bG = path.join(bind, "pars.bench.baselines")
-        local pP = path.join(bind, "pars.bench.parse")
-        local pQ = path.join(bind, "pars.bench.query")
-        local pPQ = path.join(bind, "pars.bench.pointquery")
-        local pH = path.join(bind, "pars.bench.parse.host")
-        local sd = path.join(bind, "pars.baseline.simdcsv")
+        -- Resolve each dependency's actual binary (platform/arch independent).
+        local function bin(name)
+            return target:dep(name):targetfile()
+        end
+        local pG = bin("pars.bench.boundary")
+        local bG = bin("pars.bench.baselines")
+        local pP = bin("pars.bench.parse")
+        local pQ = bin("pars.bench.query")
+        local pPQ = bin("pars.bench.pointquery")
+        local pH = bin("pars.bench.parse.host")
+        local sd = bin("pars.baseline.simdcsv")
+
+        -- python3 on POSIX, python on Windows.
+        local pyp = "python3"
+        try {
+            function () os.iorunv("python3", {"--version"}) end,
+            catch { function () pyp = "python" end }
+        }
         local header = "# format,impl,variant,scale_mb,GBps_mean,GBps_p50,GBps_p95,GBps_min,GBps_max,tokens,bytes_moved"
 
         local function rows_of(out)
@@ -265,7 +275,7 @@ target("pars.paper.data")
                 "f=open(%q,'w')\n" ..
                 "while f.tell()<t: f.write(rec.replace('\\\\n','\\n'))\n" ..
                 "f.close()\n", rec, mb, csvfile)
-            os.execv("python3", {"-c", py})
+            os.execv(pyp, {"-c", py})
             local vals = {}
             for _ = 1, iters do
                 local out = os.iorunv(sd, {"-i", "3", csvfile})
@@ -283,7 +293,7 @@ target("pars.paper.data")
         end
 
         -- C-like SOTA: flex-generated lexer, over the scales
-        local cf = path.join(bind, "pars.baseline.clike")
+        local cf = bin("pars.baseline.clike")
         for _, mb in ipairs(scales) do
             for _, l in ipairs(rows_of(os.iorunv(cf, {tostring(mb), tostring(iters)}))) do
                 br[#br + 1] = l
@@ -292,7 +302,7 @@ target("pars.paper.data")
 
         -- cuJSON (GPU JSON) reference: H2D + validation + Tokenize + Parser
         -- (their published TOTAL excludes D2H).  Variant encodes the interval.
-        local cj = path.join(bind, "pars.baseline.cujson")
+        local cj = bin("pars.baseline.cujson")
         local jdir = path.join(root, "build", "paper_json")
         os.mkdir(jdir)
         -- cuJSON Figure 9 (Standard JSON): match scripts/run_cujson_fig9.sh —
@@ -306,7 +316,7 @@ target("pars.paper.data")
             else
                 jf = path.join(jdir, "json_" .. mb .. ".json")
                 os.execv(
-                    "python3", {path.join(root, "bench", "gen_json.py"), tostring(mb), jf}
+                    pyp, {path.join(root, "bench", "gen_json.py"), tostring(mb), jf}
                 )
             end
             local vals = {}
