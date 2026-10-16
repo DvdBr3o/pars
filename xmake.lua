@@ -182,6 +182,16 @@ target("pars.bench.tree")
     add_files("bench/bench_tree.cu")
     add_includedirs("bench")
     set_languages("cxxlatest")
+
+-- Isolation probe for the unified pars::scan<Grammar> API.
+target("pars.probe.scan")
+    set_kind("binary")
+    add_deps("pars")
+    add_cugencodes("native")
+    add_rules("cccl_msvc")
+    add_files("bench/probe_scan.cu")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
 -- CSV SOTA baseline (simdcsv): Linux-only (POSIX unistd.h / mmap).
 if not is_plat("windows") then
     target("pars.baseline.simdcsv")
