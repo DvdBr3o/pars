@@ -13,6 +13,7 @@
 // Output: format,impl,variant,scale_mb,GBps,tokens
 #include "pars/parse.cuh"
 #include "pars/pars.hpp"
+#include "pars/scan.hpp"
 
 #include "grammars/clike.hpp"
 #include "grammars/csv.hpp"
@@ -295,6 +296,15 @@ int main(int argc, char** argv) {
 		cudaStreamDestroy(s1);
 		cudaEventDestroy(ev[0]);
 		cudaEventDestroy(ev[1]);
+	}
+	// pars streaming host boundary via the unified API `pars::scan<Grammar>`
+	// (chunked overlap + D2H of the index): the SOTA path.
+	{
+		const double g = sample_mean(json.size(), iters, [&] {
+			auto r = scan<bench::json_grammar>(json);
+			g_sink = g_sink + r.structural.size();
+		});
+		emit("json", "pars", "stream", mb, g, 0);
 	}
 
 	// --- csv ---
