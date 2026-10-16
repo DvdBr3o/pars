@@ -291,13 +291,13 @@ __device__ inline std::uint32_t eq32(const std::uint8_t* p, char c) {
 // ---- P1 ----
 __global__ void classify_kernel(
 	const std::uint8_t* data, int n_words, GpuSpec spec, std::uint32_t* struct_m,
-	std::uint32_t* openclose_m, std::uint32_t* delim_m, std::uint32_t* escape_m
+	std::uint32_t* openclose_m, std::uint32_t* delim_m
 ) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n_words)
 		return;
 	const std::uint8_t* p = data + (std::size_t)i * 32;
-	std::uint32_t		s = 0, oc = 0, d = 0, e = 0;
+	std::uint32_t		s = 0, oc = 0, d = 0;
 	for (int k = 0; k < spec.n_chars; ++k) {
 		std::uint32_t m = eq32(p, spec.chars[k]);
 		std::uint8_t  b = spec.buckets[k];
@@ -307,61 +307,15 @@ __global__ void classify_kernel(
 			oc |= m;
 		if (b & B_DELIM)
 			d |= m;
-		if (b & B_ESC)
-			e |= m;
 	}
 	struct_m[i]	   = s;
 	openclose_m[i] = oc;
 	delim_m[i]	   = d;
-	escape_m[i]	   = e;
 }
 
-// ---- P2: escape scan (prefix escape) as a 2-state automaton prefix scan ----
-struct Esc32 {
-	std::uint32_t escaped, escape;
-};
-
-__host__ __device__ inline Esc32 escaped_scan32(std::uint32_t e, std::uint32_t prev) {
-	if (e == 0)
-		return {prev, 0};
-	std::uint32_t pot	  = e & ~prev;
-	std::uint32_t maybe	  = pot << 1;
-	std::uint32_t and_odd = maybe | 0xAAAAAAAAu;
-	std::uint32_t even	  = and_odd - pot;
-	std::uint32_t eat	  = even ^ 0xAAAAAAAAu;
-	return {eat ^ (e | prev), eat & e};
-}
-
-__global__ void escape_transition_kernel(const std::uint32_t* esc, int n_words, std::uint8_t* f2) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n_words)
-		return;
-	Esc32		 a	= escaped_scan32(esc[i], 0);
-	Esc32		 b	= escaped_scan32(esc[i], 1);
-	std::uint8_t f0 = (a.escape >> 31) & 1;
-	std::uint8_t f1 = (b.escape >> 31) & 1;
-	f2[i]			= f0 | (f1 << 1);
-}
-
-struct ComposeF2 {
-	__host__ __device__ std::uint8_t operator()(std::uint8_t a, std::uint8_t b) const {
-		std::uint8_t a0 = a & 1, a1 = (a >> 1) & 1;
-		std::uint8_t b0 = b & 1, b1 = (b >> 1) & 1;
-		return (a0 ? b1 : b0) | ((a1 ? b1 : b0) << 1);
-	}
-};
-
-__global__ void apply_escape_kernel(
-	const std::uint32_t* esc, const std::uint32_t* delim, const std::uint8_t* f2_scan, int n_words,
-	std::uint32_t* real_delim
-) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n_words)
-		return;
-	std::uint32_t c = (i == 0) ? 0 : (f2_scan[i - 1] & 1);
-	Esc32		  r = escaped_scan32(esc[i], c);
-	real_delim[i]	= delim[i] & ~r.escaped;
-}
+// ---- P2: prefix-escape fast path removed (it was not equivalent to the desc
+// semantics); prefix escapes now go through the same narrowed monoid scan as
+// every other descriptor.  Only the parity path (prefix_xor) remains here. ----
 
 __device__ inline std::uint32_t prefix_xor32(std::uint32_t x) {
 	x ^= x << 1;
@@ -561,17 +515,14 @@ inline void malloc_or_die(void** p, std::size_t bytes, const char* what) {
 namespace detail {
 struct DeviceCache {
 	std::size_t	   cap_words = 0, cap_struct = 0, cap_oc = 0, cap_pairs = 0;
-	std::uint8_t * data = nullptr, *f2 = nullptr, *f2_scan = nullptr;
-	std::uint32_t *struct_m = nullptr, *openclose_m = nullptr, *delim_m = nullptr,
-				  *escape_m	  = nullptr;
-	std::uint32_t *real_delim = nullptr, *in_string = nullptr, *counts = nullptr, *excl = nullptr;
+	std::uint32_t *struct_m = nullptr, *openclose_m = nullptr, *delim_m = nullptr;
+	std::uint32_t *in_string = nullptr, *counts = nullptr, *excl = nullptr;
 	std::uint32_t *struct_out = nullptr, *openclose_out = nullptr, *struct_excl = nullptr,
 				  *oc_excl	  = nullptr;
 	std::int32_t * struct_idx = nullptr, *oc_struct_pos = nullptr, *delta = nullptr, *bal = nullptr;
 	std::int32_t * depth = nullptr, *order = nullptr, *oc_pair = nullptr, *pair_pos = nullptr;
 	std::uint8_t * struct_char = nullptr, *oc_char = nullptr;
 	std::uint64_t *dwt = nullptr, *dpref = nullptr;
-	std::uint32_t* dmask = nullptr;
 	bool *		   bad = nullptr, *mismatched = nullptr;
 
 	~DeviceCache() { free_all(); }
@@ -581,14 +532,9 @@ struct DeviceCache {
 			if (p)
 				cudaFree(p);
 		};
-		f(data);
-		f(f2);
-		f(f2_scan);
 		f(struct_m);
 		f(openclose_m);
 		f(delim_m);
-		f(escape_m);
-		f(real_delim);
 		f(in_string);
 		f(counts);
 		f(excl);
@@ -608,7 +554,6 @@ struct DeviceCache {
 		f(oc_char);
 		f(dwt);
 		f(dpref);
-		f(dmask);
 		f(bad);
 		f(mismatched);
 		cap_words = cap_struct = cap_oc = 0;
@@ -621,14 +566,9 @@ struct DeviceCache {
 			if (p)
 				cudaFree(p);
 		};
-		f(data);
-		f(f2);
-		f(f2_scan);
 		f(struct_m);
 		f(openclose_m);
 		f(delim_m);
-		f(escape_m);
-		f(real_delim);
 		f(in_string);
 		f(counts);
 		f(excl);
@@ -638,15 +578,9 @@ struct DeviceCache {
 		f(oc_excl);
 		f(dwt);
 		f(dpref);
-		f(dmask);
-		malloc_or_die((void**)&data, padded, "cache data");
-		malloc_or_die((void**)&f2, n_words, "cache f2");
-		malloc_or_die((void**)&f2_scan, n_words, "cache f2_scan");
 		malloc_or_die((void**)&struct_m, n_words * 4, "cache struct_m");
 		malloc_or_die((void**)&openclose_m, n_words * 4, "cache openclose_m");
 		malloc_or_die((void**)&delim_m, n_words * 4, "cache delim_m");
-		malloc_or_die((void**)&escape_m, n_words * 4, "cache escape_m");
-		malloc_or_die((void**)&real_delim, n_words * 4, "cache real_delim");
 		malloc_or_die((void**)&in_string, n_words * 4, "cache in_string");
 		malloc_or_die((void**)&counts, n_words * 4, "cache counts");
 		malloc_or_die((void**)&excl, n_words * 4, "cache excl");
@@ -656,7 +590,6 @@ struct DeviceCache {
 		malloc_or_die((void**)&oc_excl, n_words * 4, "cache oc_excl");
 		malloc_or_die((void**)&dwt, (std::size_t)n_words * 8, "cache dwt");
 		malloc_or_die((void**)&dpref, (std::size_t)n_words * 8, "cache dpref");
-		malloc_or_die((void**)&dmask, (std::size_t)n_words * 4, "cache dmask");
 		if (!bad)
 			malloc_or_die((void**)&bad, sizeof(bool), "cache bad");
 		if (!mismatched)
@@ -787,8 +720,7 @@ device_result scan_device_impl(
 		spec,
 		b.struct_m,
 		b.openclose_m,
-		b.delim_m,
-		b.escape_m
+		b.delim_m
 	);
 	check(cudaGetLastError(), "classify");
 	mark(1);
@@ -808,8 +740,7 @@ device_result scan_device_impl(
 		if (spec.n_modes == 0) {
 			cudaMemsetAsync(b.in_string, 0, n_words * 4, s);
 		} else {
-			cudaMemcpyAsync(b.real_delim, b.delim_m, n_words * 4, cudaMemcpyDeviceToDevice, s);
-			popcount_kernel<<<grid, BLOCK, 0, s>>>(b.real_delim, n_words, b.counts);
+			popcount_kernel<<<grid, BLOCK, 0, s>>>(b.delim_m, n_words, b.counts);
 			thrust::exclusive_scan(
 				thrust::cuda::par.on(s),
 				b.counts,
@@ -817,7 +748,7 @@ device_result scan_device_impl(
 				b.excl,
 				0u
 			);
-			in_string_kernel<<<grid, BLOCK, 0, s>>>(b.real_delim, b.excl, n_words, b.in_string);
+			in_string_kernel<<<grid, BLOCK, 0, s>>>(b.delim_m, b.excl, n_words, b.in_string);
 		}
 		check(cudaGetLastError(), "mode");
 	} else {
@@ -835,22 +766,9 @@ device_result scan_device_impl(
 				TCompose64 {gp.total_states}
 			);
 			desc_replay64_kernel<<<wgrid, BLOCK, 0, s>>>(
-				d_in,
-				b.dpref,
-				(int)size,
-				n_words,
-				gp,
-				b.dmask,
-				0
+				d_in, b.dpref, (int)size, n_words, gp, b.in_string, 0
 			);
 			check(cudaGetLastError(), "desc replay64");
-			cudaMemcpyAsync(
-				b.in_string,
-				b.dmask,
-				(std::size_t)n_words * 4,
-				cudaMemcpyDeviceToDevice,
-				s
-			);
 		}
 		check(cudaGetLastError(), "desc mask");
 	}
@@ -1048,8 +966,7 @@ chunk_carry scan_chunk_impl(
 		spec,
 		b.struct_m,
 		b.openclose_m,
-		b.delim_m,
-		b.escape_m
+		b.delim_m
 	);
 
 	std::uint32_t packed[3] = {0, 0, 0};
@@ -1058,8 +975,7 @@ chunk_carry scan_chunk_impl(
 		if (spec.n_modes == 0) {
 			cudaMemsetAsync(b.in_string, 0, n_words * 4, s);
 		} else {
-			cudaMemcpyAsync(b.real_delim, b.delim_m, n_words * 4, cudaMemcpyDeviceToDevice, s);
-			popcount_kernel<<<grid, BLOCK, 0, s>>>(b.real_delim, n_words, b.counts);
+			popcount_kernel<<<grid, BLOCK, 0, s>>>(b.delim_m, n_words, b.counts);
 			thrust::exclusive_scan(
 				thrust::cuda::par.on(s),
 				b.counts,
@@ -1067,7 +983,7 @@ chunk_carry scan_chunk_impl(
 				b.excl,
 				0u
 			);
-			in_string_kernel<<<grid, BLOCK, 0, s>>>(b.real_delim, b.excl, n_words, b.in_string);
+			in_string_kernel<<<grid, BLOCK, 0, s>>>(b.delim_m, b.excl, n_words, b.in_string);
 			if (in.scan & 1u)
 				xor_mask_kernel<<<grid, BLOCK, 0, s>>>(b.in_string, n_words);
 		}
@@ -1093,20 +1009,7 @@ chunk_carry scan_chunk_impl(
 					gp.total_states
 				);
 			desc_replay64_kernel<<<wgrid, BLOCK, 0, s>>>(
-				d_chunk,
-				b.dpref,
-				(int)n,
-				n_words,
-				gp,
-				b.dmask,
-				in.scan
-			);
-			cudaMemcpyAsync(
-				b.in_string,
-				b.dmask,
-				(std::size_t)n_words * 4,
-				cudaMemcpyDeviceToDevice,
-				s
+				d_chunk, b.dpref, (int)n, n_words, gp, b.in_string, in.scan
 			);
 			cudaMemcpyAsync(&carry_out, b.dpref + (n_words - 1), 8, cudaMemcpyDeviceToHost, s);
 		}

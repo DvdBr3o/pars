@@ -35,6 +35,21 @@ target("pars.test.model")
     add_files("tests/test_model.cpp")
     set_languages("cxxlatest")
 
+-- Unified algebraic core: one prefix product, three summary instances.
+target("pars.test.algebra")
+    set_kind("binary")
+    add_deps("pars")
+    add_files("tests/test_algebra.cpp")
+    set_languages("cxxlatest")
+
+-- New unified pipeline: grammar -> core::plan -> host executor (prefix_reduce).
+target("pars.test.core")
+    set_kind("binary")
+    add_deps("pars")
+    add_files("tests/test_core.cpp")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
+
 -- Meta backend (IR + rewrite): host-only static assertions.
 target("pars.test.meta")
     set_kind("binary")
@@ -135,6 +150,38 @@ target("pars.bench.boundary")
     add_includedirs("bench")
     set_languages("cxxlatest")
 
+-- Unified IR (core::plan) on the GPU: grammar -> core::plan -> scan kernels.
+target("pars.bench.core")
+    set_kind("binary")
+    add_deps("pars")
+    add_cugencodes("native")
+    add_rules("cccl_msvc")
+    add_files("bench/bench_core.cu")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
+
+-- Two consumer variants: pars + lazy iterator / DOM builder vs simdjson
+-- ondemand / dom (cuJSON is matched to the index/ondemand side).
+target("pars.bench.variants")
+    set_kind("binary")
+    add_deps("pars")
+    add_cugencodes("native")
+    add_rules("cccl_msvc")
+    add_files("bench/bench_variants.cu")
+    add_files("bench/host_variants.cpp")
+    add_packages("simdjson", "toml++", "pugixml", "inih")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
+
+-- Tree schema (R7) on the GPU: associative reduction of integer leaves.
+target("pars.bench.tree")
+    set_kind("binary")
+    add_deps("pars")
+    add_cugencodes("native")
+    add_rules("cccl_msvc")
+    add_files("bench/bench_tree.cu")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
 -- CSV SOTA baseline (simdcsv): Linux-only (POSIX unistd.h / mmap).
 if not is_plat("windows") then
     target("pars.baseline.simdcsv")
@@ -173,7 +220,7 @@ end
 target("pars.test")
     set_kind("phony")
     set_default(false)
-    add_deps("pars.test.model", "pars.test.meta", "pars.test.meta.gpu")
+    add_deps("pars.test.model", "pars.test.meta", "pars.test.meta.gpu", "pars.test.algebra", "pars.test.core")
 
 target("pars.bench")
     set_kind("phony")

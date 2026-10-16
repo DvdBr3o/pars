@@ -6,8 +6,13 @@ framework lowers any grammar that is *finitely-stateful + data-parallel +
 well-nested/associative* to a pipeline of a small set of primitives, which is
 exactly the structure behind cuJSON / simdjson / simdcsv.
 
-See **[`docs/model/model.md`](docs/model/model.md)** (readable) and
-**[`docs/model/model.tex`](docs/model/model.tex)** (formal) for the derivation.
+See **[`docs/model/algebra.md`](docs/model/algebra.md)** — the unified algebraic
+core (one monoid homomorphism + a compressibility criterion + four schemas),
+with **[`docs/model/algebra_explained.md`](docs/model/algebra_explained.md)**
+(a worked-example walkthrough) and **[`docs/model/slides.md`](docs/model/slides.md)**
+(a talk draft).  The earlier derivation is in
+**[`docs/model/model.md`](docs/model/model.md)** (readable) and
+**[`docs/model/model.tex`](docs/model/model.tex)** (formal).
 
 ## The scan algebra 𝔖 in one paragraph
 
