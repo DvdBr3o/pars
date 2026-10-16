@@ -129,31 +129,58 @@ R5 是与 schema 无关的输出阶段。**没有独立的七个原语，只有 
   PEG ⊋ CFG 只会更难；`interval` 兜底因此不承诺 SOTA。
 - **语义动作**：构值需用户提供结合语义才能进 `tree`；否则只能顺序/投机。
 - **无界前瞻 / 非良嵌套 / 左递归**：落 `interval`。
-- **移动/放置**：即便计算 `O(n)`，端到端仍受 PCIe 限制（见 §8 的 N2/N3）。
+- **移动/放置**：即便计算 `O(n)`，端到端仍受 PCIe 限制——所以评测分两个 consumer 变体
+  （§8.2），把"计算结果"与"结果怎么被消费/搬运"分开报告。
 
-## 8. 实现与评测（NVIDIA A100-PCIE-40GB，256 MB，CUDA 12.6）
+## 8. 实现与评测
 
-代码布局（𝔖′ 版本）：
+### 8.1 代码布局（𝔖′ 版本）
 
 ```
 include/pars/algebra/summary.hpp   Summary 概念 + prefix_reduce + 四个幺半群实例
+                                   （finite / stack / tree / choice，host+device）
 include/pars/core/plan.hpp         新 IR：plan = { cell(schema, ...) }
-include/pars/core/lower.hpp        文法 -> plan（含 T0 schema 检测）
+include/pars/core/lower.hpp        文法 -> plan（含 X (op X)* 的 tree 检测）
 include/pars/core/host.hpp         host 执行器（prefix_reduce 驱动）
 include/pars/core/tree.hpp         tree schema（host reduce）
 include/pars/core/cuda.hpp         GPU：finite/stack 扫描 + tree 归约
 ```
 
-测试（`xmake build pars.test && xmake run ...`）全部通过：
-`model` / `algebra` / `core` / `meta` / `meta.gpu`。
+测试：`pars.test.model / algebra / core / meta / meta.gpu` 全部通过。
 
-| 指标 | 数值（256 MB JSON，A100） |
+### 8.2 评测口径：两个 consumer 变体（取代旧的 N1/N2/N3 传输层）
+
+```
+variant = ondemand : GPU 结构索引 + 用户 lazy 迭代器（不建 DOM）
+variant = dom      : GPU 结构索引 + DOM 构建（物化全部节点）
+```
+
+Baseline（按语言匹配）：simdjson `ondemand`/`dom`（JSON）、toml++（TOML）、
+pugixml（XML）、inih（INI）。**数据**：JSON 用**真实语料**（SF city-lots GeoJSON，
+按顶层 feature 切片为 8/16/32/64/128/256/512 MB 的合法顶层数组）；其余语言用
+"每条记录都不同"的有效生成器（非机械重复）。
+
+### 8.3 设备侧指标（A100-40GB）
+
+| 指标 | 𝔖′ |
 | --- | --- |
-| JSON 结构索引（R1–R5，device） | 39.8 GB/s |
-| JSON + 括号配对（+R6） | 19.5 GB/s |
-| tree schema 归约（device） | **48.2 GB/s** |
-| 显存工作集 | 从 7–9× 降到 ≈2.9× 输入（−380 MiB） |
-| vs cuJSON（同 interval，no-D2H） | 持平/略优 |
+| JSON 结构索引（finite+stack，device） | 39.8 GB/s |
+| JSON + 括号配对 | 19.5 GB/s |
+| tree schema 归约（device, R7） | **48.2 GB/s** |
+| 显存工作集 | 7–9× → ≈2.9× 输入（−380 MiB） |
+
+### 8.4 JSON 两个变体（真实语料，GB/s）
+
+| MB | pars·lazy | pars·DOM | simdjson·ondemand | simdjson·dom |
+| --- | --- | --- | --- | --- |
+| 8 | 1.88 | 0.64 | 0.52 | 0.58 |
+| 32 | 2.43 | 0.68 | 0.52 | 0.56 |
+| 128 | 2.37 | 0.69 | 0.51 | 0.53 |
+| 512 | 2.46 | 0.70 | 0.51 | 0.53 |
+
+结论：`ondemand` 上 pars ≈ **4.7×** simdjson；`dom` 上 pars ≈ **1.3×** simdjson；跨 scale 平稳。
+其他语言（pars·DOM vs 各自 DOM 解析器）：TOML ~34×、INI ~5×、XML ~1.3×。
 
 > 状态：`finite` / `stack` / `tree` / `choice`(判别性) 已实现并有 GPU 后端；
 > `interval` 兜底与多模式 fusion/carry 为待办（不影响 §0–§6 的代数正确性）。
+> 图：`paper/src/figures/fig_variants.*`、`fig_variant_scaling.*`（数据 `paper/plots/data/variants.csv`）。
