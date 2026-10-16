@@ -445,36 +445,40 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 
 def figure_memory(mem):
-    """Memory footprint vs input, per language: pars (device) vs SOTA (host)."""
+    """Memory footprint vs input, per language: pars (device) vs SOTA (host).
+
+    Bars are laid out per language so a language's bars are adjacent."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
     fmts = [f for f in FMT_ORDER if f in set(mem["format"])]
-    impls = ["pars"] + sorted(set(mem["impl"]) - {"pars"})
-    n = len(impls)
-    w = 0.8 / n
-    x = np.arange(len(fmts))
     fig, ax = plt.subplots(figsize=FIGSIZE_WIDE, layout="constrained")
-    for i, sv in enumerate(impls):
-        vals = []
-        for f in fmts:
-            r = mem[(mem.format == f) & (mem.impl == sv)]["ratio"]
-            vals.append(float(r.iloc[0]) if len(r) else np.nan)
-        col = PARS_COLOR["N1a"] if sv == "pars" else _sota_color(sv)
-        ax.bar(x + (i - (n - 1) / 2) * w, vals, w, color=col, edgecolor="black", linewidth=0.4)
+    for xi, f in enumerate(fmts):
+        sub = mem[mem.format == f]
+        impls = ["pars"] + [i for i in dict.fromkeys(sub["impl"]) if i != "pars"]
+        nf = len(impls)
+        wf = 0.8 / max(nf, 1)
+        for j, sv in enumerate(impls):
+            r = sub[sub.impl == sv]["ratio"]
+            if not len(r):
+                continue
+            v = float(r.iloc[0])
+            col = PARS_COLOR["N1a"] if sv == "pars" else _sota_color(sv)
+            ax.bar(xi + (j - (nf - 1) / 2) * wf, v, wf, color=col, edgecolor="black",
+                   linewidth=0.4)
     ax.axhline(1.0, color="#999999", linestyle="--", linewidth=0.8)
-    ax.text(len(fmts) - 0.6, 1.08, "input (1x)", color="#666666", fontsize="x-small")
+    ax.text(len(fmts) - 0.55, 1.06, "input (1x)", color="#666666", fontsize="x-small")
     ax.set_yscale("log")
-    ax.set_xticks(x)
+    ax.set_xticks(np.arange(len(fmts)))
     ax.set_xticklabels([LABELS.get(f, f) for f in fmts])
-    ax.set_ylabel("memory / input (x, log)")
+    ax.set_ylabel("parse footprint / input (x, log)")
 
     handles = [Patch(color=PARS_COLOR["N1a"], label="pars (device)")]
     for f in fmts:
-        s = mem[(mem.format == f) & (mem.impl != "pars")]
-        if len(s):
-            impl = str(s["impl"].iloc[0])
-            handles.append(Patch(color=_sota_color(impl), label=f"{impl} (host · {LABELS.get(f, f)})"))
+        for impl in dict.fromkeys(mem[(mem.format == f) & (mem.impl != "pars")]["impl"]):
+            handles.append(
+                Patch(color=_sota_color(str(impl)), label=f"{impl} (host · {LABELS.get(f, f)})")
+            )
     seen: dict[str, object] = {}
     for h in handles:
         seen.setdefault(h.get_label(), h)
