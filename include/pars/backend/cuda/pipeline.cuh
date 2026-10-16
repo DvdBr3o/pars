@@ -1116,7 +1116,10 @@ public:
 
 	// Chunked stage-1 (parity path): caller preallocates the output with
 	// reserve_struct(total) then calls scan_chunk per chunk.
-	void		reserve_struct(std::size_t cap) const { cache_.ensure_struct(cap); }
+	void reserve_struct(std::size_t cap) const {
+		cache_.ensure_struct(cap);
+		cache_.ensure_oc(cap);	// scan_chunk writes the open/close arrays too
+	}
 
 	chunk_carry scan_chunk(
 		const std::uint8_t* d_chunk, std::size_t n, chunk_carry in, cudaStream_t s = 0,

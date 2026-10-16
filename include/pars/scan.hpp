@@ -142,19 +142,9 @@ template<class Grammar>
 	}
 
 	const std::size_t chunk = (((n + opt.chunks - 1) / opt.chunks) + 31) / 32 * 32;
-	std::fprintf(stderr, "[scan] n=%zu chunk=%zu\n", n, chunk);
 	c.ensure(chunk, n, opt.pinned);
-	std::fprintf(
-		stderr,
-		"[scan] ensured s0=%p s1=%p dev0=%p pin=%p\n",
-		(void*)c.s0,
-		(void*)c.s1,
-		(void*)c.dev[0],
-		(void*)c.pin
-	);
 	std::memcpy(c.pin, input.data(), n);
 	c.sc.reserve_struct(n);
-	std::fprintf(stderr, "[scan] reserved\n");
 
 	gpu::chunk_carry carry {};
 	std::size_t		 off = 0;
@@ -171,12 +161,11 @@ template<class Grammar>
 			cudaMemcpyAsync(c.dev[nxt], c.pin + noff, nlen, cudaMemcpyHostToDevice, c.s1);
 			cudaEventRecord(c.ev[nxt], c.s1);
 		}
-		cudaStreamWaitEvent(0, c.ev[cur], 0);
-		std::fprintf(stderr, "[scan] chunk i=%d off=%zu len=%zu\n", i, off, len);
-		carry = c.sc.scan_chunk(c.dev[cur], len, carry, 0, off);
+		cudaStreamWaitEvent(c.s0, c.ev[cur], 0);
+		carry = c.sc.scan_chunk(c.dev[cur], len, carry, c.s0, off);
 		off += len;
 	}
-	cudaStreamSynchronize(0);
+	cudaStreamSynchronize(c.s0);
 
 	r.structural.resize(carry.out_base);
 	if (carry.out_base)
