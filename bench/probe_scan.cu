@@ -4,6 +4,10 @@
 
 #include "grammars/json.hpp"
 
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
+
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -17,6 +21,15 @@ int main() {
 		json += rec;
 	}
 	json += "]";
+	// warm thrust up on the default stream first
+	{
+		std::uint32_t* d = nullptr;
+		cudaMalloc(&d, 64);
+		cudaMemset(d, 0, 64);
+		thrust::inclusive_scan(thrust::cuda::par, d, d + 16, d);
+		cudaDeviceSynchronize();
+		cudaFree(d);
+	}
 	std::fprintf(stderr, "probe: n=%zu\n", json.size());
 	auto r = scan<bench::json_grammar>(json);
 	std::fprintf(stderr, "probe: tokens=%zu\n", r.tokens());
