@@ -249,7 +249,7 @@ target("pars.paper.data")
     local paper_deps = {
         "pars.bench.boundary", "pars.bench.baselines",
         "pars.bench.parse", "pars.bench.query", "pars.bench.parse.host",
-        "pars.bench.pointquery",
+        "pars.bench.pointquery", "pars.bench.variants",
     }
     if not is_plat("windows") then
         table.insert(paper_deps, "pars.baseline.simdcsv")
@@ -286,6 +286,7 @@ target("pars.paper.data")
         local pQ = bin("pars.bench.query")
         local pPQ = bin("pars.bench.pointquery")
         local pH = bin("pars.bench.parse.host")
+        local pV = bin("pars.bench.variants")
         local sd = (not is_plat("windows")) and bin("pars.baseline.simdcsv") or nil
 
         -- python3 on POSIX, python on Windows.
@@ -414,10 +415,19 @@ target("pars.paper.data")
             end
         end
 
+        -- Two consumer variants (ondemand / dom) for every grammar.
+        local vr = {}
+        for _, mb in ipairs(scales) do
+            for _, l in ipairs(rows_of(os.iorunv(pV, {tostring(mb), tostring(iters)}))) do
+                vr[#vr + 1] = l
+            end
+        end
+
         io.writefile(path.join(outdir, "pars.csv"), header .. "\n" .. table.concat(pr, "\n") .. "\n")
         io.writefile(path.join(outdir, "baselines.csv"), header .. "\n" .. table.concat(br, "\n") .. "\n")
         io.writefile(path.join(outdir, "stages.csv"),
             "# format,scale_mb,r1_ms,r2r4_ms,r3r5_ms,r6_ms\n" .. table.concat(sr, "\n") .. "\n")
         io.writefile(path.join(outdir, "parse.csv"), header .. "\n" .. table.concat(par, "\n") .. "\n")
-        print("wrote paper/plots/data/{pars,baselines,stages,parse}.csv")
+        io.writefile(path.join(outdir, "variants.csv"), header .. "\n" .. table.concat(vr, "\n") .. "\n")
+        print("wrote paper/plots/data/{pars,baselines,stages,parse,variants}.csv")
     end)

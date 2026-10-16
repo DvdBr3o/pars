@@ -151,6 +151,17 @@ def load_parse(data_dir: Path = DATADIR) -> pd.DataFrame:
     return _read(data_dir / "parse.csv", PARS_COLS)
 
 
+# Two consumer variants: ondemand (lazy index consume) / dom (materialise).
+VARIANT_COLS = ["format", "impl", "variant", "scale_mb", "GBps", "tokens"]
+VARIANT_LABEL = {"ondemand": "lazy iterator", "dom": "DOM builder"}
+VARIANT_COLOR = {"ondemand": "#4C72B0", "dom": "#55A868"}
+VARIANT_MARKER = {"ondemand": "o", "dom": "s"}
+
+
+def load_variants(data_dir: Path = DATADIR) -> pd.DataFrame:
+    return _read(data_dir / "variants.csv", VARIANT_COLS)
+
+
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -419,4 +430,100 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 # fig_distribution was removed: it duplicated fig_sota (same grouped bars,
 # only a linear y-axis).  Use fig_sota / fig_scaling instead.
+
+
+def figure_variants(variants, scale=None):
+    """The two consumer variants (ondemand / dom): pars vs matched SOTA per
+    language, at one input scale (log y).  This replaces the N1/N2/N3 transport
+    tiers with the consumer axis the paper reports on."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+
+    scale = scale or int(variants["scale_mb"].max())
+    df = variants[variants.scale_mb == scale]
+    fmts = [f for f in FMT_ORDER if f in set(df["format"])]
+
+    fig, axes = plt.subplots(1, 2, figsize=FIGSIZE_WIDE, layout="constrained", sharey=True)
+    x = np.arange(len(fmts))
+    w = 0.38
+    for ax, variant in zip(axes, ["ondemand", "dom"]):
+        sub = df[df.variant == variant]
+        pars_v, sota_v, sota_c = [], [], []
+        for f in fmts:
+            p = sub[(sub.format == f) & (sub.impl == "pars")]["GBps"]
+            pars_v.append(float(p.iloc[0]) if len(p) else np.nan)
+            s = sub[(sub.format == f) & (sub.impl != "pars")]
+            if len(s):
+                sota_v.append(float(s["GBps"].iloc[0]))
+                sota_c.append(_sota_color(str(s["impl"].iloc[0])))
+            else:
+                sota_v.append(np.nan)
+                sota_c.append(SOTA_FALLBACK)
+        ax.bar(x - w / 2, pars_v, w, color=PARS_COLOR["N1a"], edgecolor="black", linewidth=0.4)
+        ax.bar(x + w / 2, sota_v, w, color=sota_c, edgecolor="black", linewidth=0.4)
+        ax.set_yscale("log")
+        ax.set_xticks(x)
+        ax.set_xticklabels([LABELS.get(f, f) for f in fmts], rotation=30, ha="right",
+                           fontsize="small")
+        ax.set_title(f"variant: {VARIANT_LABEL[variant]}", fontsize="medium")
+    axes[0].set_ylabel("GB/s (log scale)")
+    axes[0].set_xlabel(f"input = {scale} MB")
+
+    handles = [Patch(color=PARS_COLOR["N1a"], label="pars")]
+    for f in fmts:
+        s = df[(df.format == f) & (df.impl != "pars")]
+        if len(s):
+            impl = str(s["impl"].iloc[0])
+            handles.append(Patch(color=_sota_color(impl), label=f"{impl} ({LABELS.get(f, f)})"))
+    seen: dict[str, object] = {}
+    for h in handles:
+        seen.setdefault(h.get_label(), h)
+    fig.legend(list(seen.values()), list(seen.keys()), ncols=4, fontsize="small",
+               loc="outside lower center")
+    return fig
+
+
+def figure_variant_scaling(variants):
+    """Throughput vs input size for the two variants, one facet per language."""
+    import matplotlib.pyplot as plt
+
+    fmts = [f for f in FMT_ORDER if f in set(variants["format"])]
+    ncol = 3
+    nrow = (len(fmts) + ncol - 1) // ncol
+    fig, axes = plt.subplots(nrow, ncol, figsize=FIGSIZE_WIDE, squeeze=False,
+                             layout="constrained")
+    for ax, f in zip(axes.flat, fmts):
+        for variant in ("ondemand", "dom"):
+            d = variants[
+                (variants.format == f) & (variants.impl == "pars") & (variants.variant == variant)
+            ].sort_values("scale_mb")
+            if not d.empty:
+                ax.plot(d["scale_mb"], d["GBps"], marker=VARIANT_MARKER[variant],
+                        color=VARIANT_COLOR[variant], linewidth=1.2,
+                        label=f"pars · {VARIANT_LABEL[variant]}")
+        b = variants[(variants.format == f) & (variants.impl != "pars")]
+        for impl in dict.fromkeys(b["impl"]):
+            for variant in dict.fromkeys(b[b.impl == impl]["variant"]):
+                d = b[(b.impl == impl) & (b.variant == variant)].sort_values("scale_mb")
+                ax.plot(d["scale_mb"], d["GBps"], marker="^", color=_sota_color(impl),
+                        linestyle="--", linewidth=1.0,
+                        label=f"{impl} · {VARIANT_LABEL[variant]}")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xticks(sorted(set(variants["scale_mb"])))
+        ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
+        ax.minorticks_off()
+        ax.tick_params(axis="x", labelsize="x-small", rotation=45)
+        ax.set_title(LABELS.get(f, f), fontsize="medium")
+        ax.set_xlabel("input (MB)")
+        ax.set_ylabel("GB/s")
+    for ax in axes.flat[len(fmts):]:
+        ax.axis("off")
+    seen: dict[str, object] = {}
+    for ax in axes.flat:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            seen.setdefault(l, h)
+    fig.legend(list(seen.values()), list(seen.keys()), ncols=4, fontsize="small",
+               loc="outside upper center")
+    return fig
 
