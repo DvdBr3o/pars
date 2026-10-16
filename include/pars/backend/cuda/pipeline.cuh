@@ -607,6 +607,23 @@ struct DeviceCache {
 		cap_struct = n_struct;
 	}
 
+	// Grow the structural index while preserving the used prefix (the chunked
+	// scan appends to it, so it must not be freed).
+	void ensure_struct_grow(std::size_t needed, std::size_t used) {
+		if (needed <= cap_struct)
+			return;
+		std::size_t ncap = cap_struct ? cap_struct : 4096;
+		while (ncap < needed) ncap = ncap + ncap / 2;
+		std::int32_t* nidx = nullptr;
+		malloc_or_die((void**)&nidx, ncap * 4, "cache struct_idx grow");
+		if (struct_idx && used)
+			cudaMemcpy(nidx, struct_idx, used * 4, cudaMemcpyDeviceToDevice);
+		if (struct_idx)
+			cudaFree(struct_idx);
+		struct_idx = nidx;
+		cap_struct = ncap;
+	}
+
 	// pair_pos is the same size as the result; allocate it only on demand.
 	void ensure_pairs(std::size_t n) {
 		if (n <= cap_pairs)
@@ -1041,6 +1058,7 @@ chunk_carry scan_chunk_impl(
 		cudaMemcpyAsync(&packed[2], b.in_string + (n_words - 1), 4, cudaMemcpyDeviceToHost, s);
 	cudaStreamSynchronize(s);	// counts are needed before scatter
 	b.ensure_oc(packed[1]);		// per-chunk open/close scratch (chunk-local indices)
+	b.ensure_struct_grow(in.out_base + packed[0], in.out_base);	// append, preserving
 	scatter_kernel<<<grid, BLOCK, 0, s>>>(
 		d_chunk,
 		b.struct_out,
@@ -1113,6 +1131,9 @@ public:
 	// Chunked stage-1 (parity path): caller preallocates the output with
 	// reserve_struct(total) then calls scan_chunk per chunk.
 	void		reserve_struct(std::size_t cap) const { cache_.ensure_struct(cap); }
+	void		reserve_struct_grow(std::size_t needed, std::size_t used) const {
+		cache_.ensure_struct_grow(needed, used);
+	}
 
 	chunk_carry scan_chunk(
 		const std::uint8_t* d_chunk, std::size_t n, chunk_carry in, cudaStream_t s = 0,

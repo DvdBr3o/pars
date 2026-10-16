@@ -155,7 +155,7 @@ template<class Grammar>
 		std::memcpy(c.pin, input.data(), n);
 		src = c.pin;
 	}
-	c.sc.reserve_struct(n);
+	// (the chunked scan grows the structural index on demand)
 
 	gpu::chunk_carry carry {};
 	std::size_t		 off = 0;
