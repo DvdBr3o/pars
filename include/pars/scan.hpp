@@ -74,9 +74,7 @@ struct stream_ctx {
 	std::size_t								  pincap = 0;
 
 	stream_ctx() {
-		int dev = 0;
-		cudaGetDevice(&dev);	 // force the runtime/context up on this thread
-		cudaSetDevice(dev);
+		cudaFree(nullptr);	 // force the runtime + primary context up on this thread
 		cudaStreamCreate(&s0);
 		cudaStreamCreate(&s1);
 		cudaEventCreate(&ev[0]);
