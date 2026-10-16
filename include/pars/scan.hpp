@@ -175,6 +175,13 @@ template<class Grammar>
 		cudaStreamWaitEvent(c.s0, c.ev[cur], 0);
 		carry = c.sc.scan_chunk(c.dev[cur], len, carry, c.s0, off);
 		off += len;
+		if (i == 0 && off < n) {
+			// estimate the total token count from the first chunk and reserve once
+			// (so the index does not repeatedly realloc -> steady == peak)
+			const double est = static_cast<double>(carry.out_base)
+							 * (static_cast<double>(n) / static_cast<double>(len)) * 1.05 + 64.0;
+			c.sc.reserve_struct_grow(static_cast<std::size_t>(est), carry.out_base);
+		}
 	}
 	cudaStreamSynchronize(c.s0);
 
