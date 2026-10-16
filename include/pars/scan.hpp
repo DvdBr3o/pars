@@ -31,9 +31,10 @@
 namespace pars {
 
 struct scan_options {
-	bool pairs	= false;  // materialise bracket partners (forces a global pass)
-	int	 chunks = 16;	  // streaming chunks; 0 -> single-shot device scan
-	bool pinned = true;	  // pinned host staging
+	bool pairs	 = false;  // materialise bracket partners (forces a global pass)
+	int	 chunks	 = 16;	   // streaming chunks; 0 -> single-shot device scan
+	bool pinned	 = true;   // pinned host staging
+	bool to_host = true;   // copy the index back; false = keep it on the device
 };
 
 // The unified result: a structural index (+ optional bracket partners), with a
@@ -42,8 +43,13 @@ struct scan_result {
 	std::vector<std::int32_t> structural;
 	std::vector<std::int32_t> pair;
 	bool					  well_formed = true;
+	// when scan_options::to_host == false the index stays on the device:
+	const std::int32_t* device_pos	  = nullptr;
+	std::size_t			device_tokens = 0;
 
-	[[nodiscard]] std::size_t tokens() const noexcept { return structural.size(); }
+	[[nodiscard]] std::size_t tokens() const noexcept {
+		return device_pos ? device_tokens : structural.size();
+	}
 
 	template<class Visitor>
 	void visit(std::string_view s, Visitor&& v) const {
@@ -167,6 +173,11 @@ template<class Grammar>
 	}
 	cudaStreamSynchronize(c.s0);
 
+	if (!opt.to_host) {
+		r.device_pos	   = c.sc.struct_ptr();
+		r.device_tokens = carry.out_base;
+		return r;
+	}
 	r.structural.resize(carry.out_base);
 	if (carry.out_base)
 		cudaMemcpy(

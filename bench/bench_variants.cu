@@ -298,11 +298,13 @@ int main(int argc, char** argv) {
 		cudaEventDestroy(ev[1]);
 	}
 	// pars streaming host boundary via the unified API `pars::scan<Grammar>`
-	// (chunked overlap + D2H of the index): the SOTA path.
+	// (chunked overlap, index stays on device): the SOTA path.
 	{
+		scan_options o;
+		o.to_host  = false;
 		const double g = sample_mean(json.size(), iters, [&] {
-			auto r = scan<bench::json_grammar>(json);
-			g_sink = g_sink + r.structural.size();
+			auto r = scan<bench::json_grammar>(json, o);
+			g_sink = g_sink + r.tokens();
 		});
 		emit("json", "pars", "stream", mb, g, 0);
 	}
