@@ -1,0 +1,8 @@
+# format,impl,scale_mb,input_mib,used_mib,ratio
+json,pars,8,8.0,38.0,4.75
+json,pars,16,16.0,72.0,4.50
+json,pars,32,32.0,140.0,4.38
+json,pars,64,64.0,282.0,4.41
+json,pars,128,128.0,560.0,4.38
+json,pars,256,256.0,1112.0,4.34
+json,pars,512,512.0,2208.0,4.31

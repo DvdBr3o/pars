@@ -183,7 +183,7 @@ toml++（TOML）、pugixml（XML）、inih（INI）。**数据**：JSON 用**真
 | JSON 结构索引（finite+stack，device） | 39.8 GB/s |
 | JSON + 括号配对 | 19.5 GB/s |
 | tree schema 归约（device, R7） | **48.2 GB/s** |
-| 显存工作集 | 7–9× → ≈2.9× 输入（−380 MiB） |
+| 显存工作集（scanner，JSON） | ≈**4.3×** 输入（图 `fig_memory`） |
 
 ### 8.4 JSON（真实语料，GB/s）
 
