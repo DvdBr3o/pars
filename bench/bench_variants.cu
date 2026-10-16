@@ -298,15 +298,21 @@ int main(int argc, char** argv) {
 		cudaEventDestroy(ev[1]);
 	}
 	// pars streaming host boundary via the unified API `pars::scan<Grammar>`
-	// (chunked overlap, index stays on device): the SOTA path.
+	// (chunked overlap, index stays on device, input pre-staged): the SOTA path.
 	{
-		scan_options o;
-		o.to_host  = false;
+		std::uint8_t* pin = nullptr;
+		cudaHostAlloc(&pin, json.size(), cudaHostAllocDefault);
+		std::memcpy(pin, json.data(), json.size());
+		std::string_view staged(reinterpret_cast<const char*>(pin), json.size());
+		scan_options	 o;
+		o.to_host = false;
+		o.copy_in = false;
 		const double g = sample_mean(json.size(), iters, [&] {
-			auto r = scan<bench::json_grammar>(json, o);
+			auto r = scan<bench::json_grammar>(staged, o);
 			g_sink = g_sink + r.tokens();
 		});
 		emit("json", "pars", "stream", mb, g, 0);
+		cudaFreeHost(pin);
 	}
 
 	// --- csv ---

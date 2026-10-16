@@ -35,6 +35,7 @@ struct scan_options {
 	int	 chunks	 = 16;	   // streaming chunks; 0 -> single-shot device scan
 	bool pinned	 = true;   // pinned host staging
 	bool to_host = true;   // copy the index back; false = keep it on the device
+	bool copy_in = true;   // stage the input into pinned memory; false = already pinned
 };
 
 // The unified result: a structural index (+ optional bracket partners), with a
@@ -149,13 +150,17 @@ template<class Grammar>
 
 	const std::size_t chunk = (((n + opt.chunks - 1) / opt.chunks) + 31) / 32 * 32;
 	c.ensure(chunk, n, opt.pinned);
-	std::memcpy(c.pin, input.data(), n);
+	const std::uint8_t* src = reinterpret_cast<const std::uint8_t*>(input.data());
+	if (opt.copy_in) {
+		std::memcpy(c.pin, input.data(), n);
+		src = c.pin;
+	}
 	c.sc.reserve_struct(n);
 
 	gpu::chunk_carry carry {};
 	std::size_t		 off = 0;
 	int				 i	 = 0;
-	cudaMemcpyAsync(c.dev[0], c.pin, std::min(chunk, n), cudaMemcpyHostToDevice, c.s1);
+	cudaMemcpyAsync(c.dev[0], src, std::min(chunk, n), cudaMemcpyHostToDevice, c.s1);
 	cudaEventRecord(c.ev[0], c.s1);
 	for (; off < n; ++i) {
 		const int		  cur = i & 1, nxt = (i + 1) & 1;
@@ -164,7 +169,7 @@ template<class Grammar>
 			const std::size_t noff = off + len, nlen = std::min(chunk, n - noff);
 			if (i >= 1)
 				cudaStreamWaitEvent(c.s1, c.ev[nxt], 0);
-			cudaMemcpyAsync(c.dev[nxt], c.pin + noff, nlen, cudaMemcpyHostToDevice, c.s1);
+			cudaMemcpyAsync(c.dev[nxt], src + noff, nlen, cudaMemcpyHostToDevice, c.s1);
 			cudaEventRecord(c.ev[nxt], c.s1);
 		}
 		cudaStreamWaitEvent(c.s0, c.ev[cur], 0);
