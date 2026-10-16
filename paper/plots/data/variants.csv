@@ -118,3 +118,10 @@ xml,pars,dom,512,0.686,162014767
 xml,pugixml,dom,512,0.578,0
 clike,pars,ondemand,512,4.035,23253686
 clike,pars,dom,512,0.746,46507373
+json,cujson,ondemand,8,1.884,0
+json,cujson,ondemand,16,3.187,0
+json,cujson,ondemand,32,4.841,0
+json,cujson,ondemand,64,7.118,0
+json,cujson,ondemand,128,8.205,0
+json,cujson,ondemand,256,10.897,0
+json,cujson,ondemand,512,13.371,0

@@ -305,7 +305,7 @@ target("pars.paper.data")
             return t
         end
 
-        local pr, br, sr, par, qr = {}, {}, {}, {}, {}
+        local pr, br, sr, par, qr, vr = {}, {}, {}, {}, {}, {}
         for _, mb in ipairs(scales) do
             local po = os.iorunv(pG, {tostring(mb), tostring(iters)})
             for line in po:gmatch("[^\n]+") do
@@ -411,12 +411,13 @@ target("pars.paper.data")
                     local q = function(p) return vals[math.max(1, math.min(#vals, math.floor(p * (#vals - 1)) + 1))] end
                     br[#br + 1] = string.format("json,cujson,R1-R6+T_in,%d,%.3f,%.3f,%.3f,%.3f,%.3f,0,0",
                         mb, sum / #vals, q(0.50), q(0.95), vals[1], vals[#vals])
+                    -- cuJSON emits a structural index (no DOM) -> the ondemand side
+                    vr[#vr + 1] = string.format("json,cujson,ondemand,%d,%.3f,0", mb, sum / #vals)
                 end
             end
         end
 
         -- Two consumer variants (ondemand / dom) for every grammar.
-        local vr = {}
         for _, mb in ipairs(scales) do
             for _, l in ipairs(rows_of(os.iorunv(pV, {tostring(mb), tostring(iters)}))) do
                 vr[#vr + 1] = l

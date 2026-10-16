@@ -433,34 +433,32 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 
 def figure_variants(variants, scale=None):
-    """The two consumer variants (ondemand / dom): pars vs matched SOTA per
-    language, at one input scale (log y).  This replaces the N1/N2/N3 transport
-    tiers with the consumer axis the paper reports on."""
+    """The two consumer variants (ondemand / dom): pars vs every matched SOTA
+    per language, at one input scale (log y).  This is the consumer axis the
+    paper reports on (replacing the N1/N2/N3 transport tiers)."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
     scale = scale or int(variants["scale_mb"].max())
     df = variants[variants.scale_mb == scale]
     fmts = [f for f in FMT_ORDER if f in set(df["format"])]
+    impls = sorted(set(df["impl"]) - {"pars"})
+    series = ["pars"] + impls
+    n = len(series)
+    w = 0.8 / n
 
     fig, axes = plt.subplots(1, 2, figsize=FIGSIZE_WIDE, layout="constrained", sharey=True)
     x = np.arange(len(fmts))
-    w = 0.38
     for ax, variant in zip(axes, ["ondemand", "dom"]):
         sub = df[df.variant == variant]
-        pars_v, sota_v, sota_c = [], [], []
-        for f in fmts:
-            p = sub[(sub.format == f) & (sub.impl == "pars")]["GBps"]
-            pars_v.append(float(p.iloc[0]) if len(p) else np.nan)
-            s = sub[(sub.format == f) & (sub.impl != "pars")]
-            if len(s):
-                sota_v.append(float(s["GBps"].iloc[0]))
-                sota_c.append(_sota_color(str(s["impl"].iloc[0])))
-            else:
-                sota_v.append(np.nan)
-                sota_c.append(SOTA_FALLBACK)
-        ax.bar(x - w / 2, pars_v, w, color=PARS_COLOR["N1a"], edgecolor="black", linewidth=0.4)
-        ax.bar(x + w / 2, sota_v, w, color=sota_c, edgecolor="black", linewidth=0.4)
+        for i, sv in enumerate(series):
+            vals = []
+            for f in fmts:
+                r = sub[(sub.format == f) & (sub.impl == sv)]["GBps"]
+                vals.append(float(r.iloc[0]) if len(r) else np.nan)
+            col = PARS_COLOR["N1a"] if sv == "pars" else _sota_color(sv)
+            ax.bar(x + (i - (n - 1) / 2) * w, vals, w, color=col, edgecolor="black",
+                   linewidth=0.4)
         ax.set_yscale("log")
         ax.set_xticks(x)
         ax.set_xticklabels([LABELS.get(f, f) for f in fmts], rotation=30, ha="right",
@@ -471,14 +469,12 @@ def figure_variants(variants, scale=None):
 
     handles = [Patch(color=PARS_COLOR["N1a"], label="pars")]
     for f in fmts:
-        s = df[(df.format == f) & (df.impl != "pars")]
-        if len(s):
-            impl = str(s["impl"].iloc[0])
-            handles.append(Patch(color=_sota_color(impl), label=f"{impl} ({LABELS.get(f, f)})"))
+        for impl in dict.fromkeys(df[(df.format == f) & (df.impl != "pars")]["impl"]):
+            handles.append(Patch(color=_sota_color(str(impl)), label=f"{impl} ({LABELS.get(f, f)})"))
     seen: dict[str, object] = {}
     for h in handles:
         seen.setdefault(h.get_label(), h)
-    fig.legend(list(seen.values()), list(seen.keys()), ncols=4, fontsize="small",
+    fig.legend(list(seen.values()), list(seen.keys()), ncols=5, fontsize="small",
                loc="outside lower center")
     return fig
 
