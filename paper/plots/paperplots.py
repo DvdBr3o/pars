@@ -166,6 +166,14 @@ def load_variants(data_dir: Path = DATADIR) -> pd.DataFrame:
     return _read(data_dir / "variants.csv", VARIANT_COLS)
 
 
+# Device working set: how much memory the scanner holds vs the input.
+MEMORY_COLS = ["format", "impl", "scale_mb", "input_mib", "used_mib", "ratio"]
+
+
+def load_memory(data_dir: Path = DATADIR) -> pd.DataFrame:
+    return _read(data_dir / "memory.csv", MEMORY_COLS)
+
+
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -434,6 +442,32 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 # fig_distribution was removed: it duplicated fig_sota (same grouped bars,
 # only a linear y-axis).  Use fig_sota / fig_scaling instead.
+
+
+def figure_memory(mem):
+    """Device working set of the generated scanner vs the input size."""
+    import matplotlib.pyplot as plt
+
+    fmts = list(dict.fromkeys(mem["format"]))
+    fig, ax = plt.subplots(figsize=FIGSIZE, layout="constrained")
+    for f in fmts:
+        d = mem[mem.format == f].sort_values("scale_mb")
+        ax.plot(d["scale_mb"], d["used_mib"], marker="o", color=PARS_COLOR["N1a"],
+                label=f"pars · {LABELS.get(f, f)} (working set)")
+        ax.plot(d["scale_mb"], d["input_mib"], marker=".", color="#999999",
+                linestyle="--", label="input (1x)")
+    dmax = mem.sort_values("scale_mb").iloc[-1]
+    ax.annotate(f"{dmax['ratio']:.1f}x input", (dmax["scale_mb"], dmax["used_mib"]),
+                textcoords="offset points", xytext=(-6, 6), fontsize="x-small")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xticks(sorted(set(mem["scale_mb"])))
+    ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
+    ax.minorticks_off()
+    ax.set_xlabel("input (MB)")
+    ax.set_ylabel("device memory (MiB)")
+    ax.legend(fontsize="small", loc="upper left")
+    return fig
 
 
 def figure_variants(variants, scale=None):

@@ -48,6 +48,7 @@ def main() -> int:
     stages = P.load_stages(args.data)
     parse = P.load_parse(args.data)
     variants = P.load_variants(args.data)
+    memory   = P.load_memory(args.data)
 
     builders = {
         "sota": lambda: P.figure_sota(pars, base),
@@ -56,6 +57,7 @@ def main() -> int:
         "parse": lambda: P.figure_parse(pars, parse, base),
         "variants": lambda: P.figure_variants(variants),
         "variant_scaling": lambda: P.figure_variant_scaling(variants),
+        "memory": lambda: P.figure_memory(memory),
     }
     names = args.only or list(builders)
     out = (P.FIGDIR / args.env) if args.env else args.out
