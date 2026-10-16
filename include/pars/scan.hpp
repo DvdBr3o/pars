@@ -161,11 +161,11 @@ template<class Grammar>
 			cudaMemcpyAsync(c.dev[nxt], c.pin + noff, nlen, cudaMemcpyHostToDevice, c.s1);
 			cudaEventRecord(c.ev[nxt], c.s1);
 		}
-		cudaStreamWaitEvent(c.s0, c.ev[cur], 0);
-		carry = c.sc.scan_chunk(c.dev[cur], len, carry, c.s0, off);
+		cudaStreamWaitEvent(0, c.ev[cur], 0);
+		carry = c.sc.scan_chunk(c.dev[cur], len, carry, 0, off);
 		off += len;
 	}
-	cudaStreamSynchronize(c.s0);
+	cudaStreamSynchronize(0);
 
 	r.structural.resize(carry.out_base);
 	if (carry.out_base)
