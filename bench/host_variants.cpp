@@ -50,6 +50,81 @@ int ini_cb(void* user, const char*, const char*, const char*) {
 }
 }  // namespace
 
+namespace {
+// Shape-agnostic recursive traversal: touch every key and value once.  Works on
+// the real corpus (GeoJSON features with nested geometry), not just a fixed
+// record shape.
+void walk_dom(simdjson::dom::element e, std::uint64_t& sink) {
+	switch (e.type()) {
+		case simdjson::dom::element_type::OBJECT:
+			for (auto [k, v] : e.get_object()) {
+				sink += k.size();
+				walk_dom(v, sink);
+			}
+			break;
+		case simdjson::dom::element_type::ARRAY:
+			for (auto v : e.get_array()) walk_dom(v, sink);
+			break;
+		case simdjson::dom::element_type::STRING:
+			{
+				std::string_view s;
+				if (!e.get_string().get(s)) sink += s.size();
+			}
+			break;
+		case simdjson::dom::element_type::INT64:
+			{
+				int64_t x;
+				if (!e.get_int64().get(x)) sink += static_cast<std::uint64_t>(x);
+			}
+			break;
+		case simdjson::dom::element_type::DOUBLE:
+			{
+				double x;
+				if (!e.get_double().get(x)) sink += static_cast<std::uint64_t>(x);
+			}
+			break;
+		default: break;
+	}
+}
+
+template<class V>
+void walk_od(V&& v, std::uint64_t& sink) {
+	switch (v.type()) {
+		case simdjson::ondemand::json_type::object:
+			{
+				simdjson::ondemand::object o;
+				if (v.get_object().get(o)) break;
+				for (auto f : o) {
+					std::string_view k = f.unescaped_key();
+					sink += k.size();
+					walk_od(f.value(), sink);
+				}
+			}
+			break;
+		case simdjson::ondemand::json_type::array:
+			{
+				simdjson::ondemand::array a;
+				if (v.get_array().get(a)) break;
+				for (auto e : a) walk_od(e, sink);
+			}
+			break;
+		case simdjson::ondemand::json_type::string:
+			{
+				std::string_view s;
+				if (!v.get_string().get(s)) sink += s.size();
+			}
+			break;
+		case simdjson::ondemand::json_type::number:
+			{
+				double d;
+				if (!v.get_double().get(d)) sink += static_cast<std::uint64_t>(d);
+			}
+			break;
+		default: break;
+	}
+}
+}  // namespace
+
 extern "C" void bv_simdjson_ondemand(const char* data, std::size_t n, int iters, std::size_t mb) {
 	simdjson::padded_string	   ps(data, n);
 	simdjson::ondemand::parser p;
@@ -59,14 +134,7 @@ extern "C" void bv_simdjson_ondemand(const char* data, std::size_t n, int iters,
 		 simdjson::ondemand::array	  arr;
 		 if (doc.get_array().get(arr))
 			 return;
-		 for (auto v : arr) {
-			 simdjson::ondemand::object obj;
-			 if (v.get_object().get(obj))
-				 continue;
-			 int64_t id = 0;
-			 if (obj["id"].get_int64().get(id) == simdjson::SUCCESS)
-				 sink += static_cast<std::uint64_t>(id);
-		 }
+		 for (auto v : arr) walk_od(v, sink);
 	 };
 	emit("json", "simdjson", "ondemand", mb, n, iters, run);
 	(void)sink;
@@ -80,12 +148,7 @@ extern "C" void bv_simdjson_dom(const char* data, std::size_t n, int iters, std:
 		   simdjson::dom::element root;
 		   if (p.parse(ps).get(root))
 			   return;
-		   simdjson::dom::array arr = root.get_array();
-		   for (auto v : arr) {
-			   int64_t id = 0;
-			   if (v["id"].get_int64().get(id) == simdjson::SUCCESS)
-				   sink += static_cast<std::uint64_t>(id);
-		   }
+		   walk_dom(root, sink);
 	   };
 	emit("json", "simdjson", "dom", mb, n, iters, run);
 	(void)sink;

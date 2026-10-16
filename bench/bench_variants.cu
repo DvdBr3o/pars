@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 using namespace std::chrono;
@@ -127,10 +128,74 @@ void run_lang(const char* fmt, const std::string& payload, std::size_t mb, int i
 	emit(fmt, "pars", "dom", mb, g_dom, nodes);
 }
 
-std::string repeat_rec(const std::string& rec, std::size_t target) {
+std::string read_file(const std::string& path) {
+	std::ifstream f(path, std::ios::binary);
+	if (!f)
+		return {};
+	return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+// ---------------------------------------------------------------------------
+// Varied, valid payload generators (no single repeated record): the structure
+// stays valid but every record differs, so the input is not mechanically
+// periodic.  (JSON uses the real corpus instead.)
+// ---------------------------------------------------------------------------
+std::string gen_csv(std::size_t target) {
+	static const char* rows[] = {
+		"alpha,beta,\"quoted, field\",\"has \"\"q\"\"\",42,true\n",
+		"x,y,z,1,2,3\n",
+		"\"a,b\",\"c\"\"d\",e,100,false\n",
+		"long_field_name,another,third,4.5,-6,true\n",
+		"1,2,3,4,5,6,7,8\n",
+		"city,pop,lat,lon\n",
+	};
 	std::string out;
-	out.reserve(target);
-	while (out.size() < target) out += rec;
+	out.reserve(target + 256);
+	std::uint32_t st = 0x9e3779b9u;
+	while (out.size() < target) {
+		st = st * 1664525u + 1013904223u;
+		out += rows[st % (sizeof(rows) / sizeof(rows[0]))];
+	}
+	return out;
+}
+
+std::string gen_toml(std::size_t target) {
+	std::string out;
+	out.reserve(target + 256);
+	for (std::size_t k = 0; out.size() < target; ++k)
+		out += "[t" + std::to_string(k) + "]\nhost = \"h" + std::to_string(k % 97)
+			   + "\"\nport = " + std::to_string(1000 + (k * 37) % 9000)
+			   + "\nname = 'n" + std::to_string(k % 13)
+			   + "'\n# comment { } , = with \"quotes\"\narr = [" + std::to_string(k % 5) + ", "
+			   + std::to_string(k % 7) + ", " + std::to_string(k % 11) + "]\n";
+	return out;
+}
+
+std::string gen_ini(std::size_t target) {
+	std::string out;
+	out.reserve(target + 256);
+	for (std::size_t k = 0; out.size() < target; ++k)
+		out += "[section" + std::to_string(k) + "]\nkey = value" + std::to_string(k)
+			   + "\nnum = " + std::to_string(k * 3) + "\n; comment\nother = x" + std::to_string(k % 9)
+			   + "\n";
+	return out;
+}
+
+std::string gen_xml(std::size_t target) {
+	std::string out;
+	out.reserve(target + 256);
+	for (std::size_t k = 0; out.size() < target; ++k)
+		out += "<item id=\"" + std::to_string(k) + "\" name=\"x &amp; y" + std::to_string(k % 11)
+			   + "\"><name>alpha" + std::to_string(k % 7) + "</name></item>";
+	return out;
+}
+
+std::string gen_clike(std::size_t target) {
+	std::string out;
+	out.reserve(target + 256);
+	for (std::size_t k = 0; out.size() < target; ++k)
+		out += "int x" + std::to_string(k) + "; /* c { ; } */ y" + std::to_string(k % 13) + " = "
+			   + std::to_string(k % 100) + "; // { ; }\n";
 	return out;
 }
 
@@ -139,13 +204,17 @@ std::string repeat_rec(const std::string& rec, std::size_t target) {
 int main(int argc, char** argv) {
 	const std::size_t mb	 = argc > 1 ? (std::size_t)std::atol(argv[1]) : 64;
 	const int		  iters	 = argc > 2 ? std::atoi(argv[2]) : 5;
+	const std::string pdir	 = argc > 3 ? argv[3] : "";
 	const std::size_t target = mb * 1024 * 1024;
 
 	std::printf("# format,impl,variant,scale_mb,GBps,tokens\n");
 
-	// --- json ---
+	// --- json: real corpus slice if a payload dir is given, else a generated
+	//     array of records ---
 	std::string json;
-	{
+	if (!pdir.empty())
+		json = read_file(pdir + "/json_" + std::to_string(mb) + ".json");
+	if (json.empty()) {
 		const std::string rec =
 			"{\"id\":123,\"name\":\"x \\\"y\\\"\",\"a\":[1,2,3],\"n\":{\"z\":null}}";
 		json.push_back('[');
@@ -160,34 +229,26 @@ int main(int argc, char** argv) {
 	bv_simdjson_dom(json.data(), json.size(), iters, mb);
 
 	// --- csv ---
-	std::string csv =
-		repeat_rec("alpha,beta,\"quoted, field\",\"has \"\"q\"\"\",42,true\n", target);
+	std::string csv = gen_csv(target);
 	run_lang<bench::csv_grammar>("csv", csv, mb, iters);
 
 	// --- toml ---
-	std::string toml;
-	{
-		std::size_t i = 0;
-		while (toml.size() < target)
-			toml += "[t" + std::to_string(i++)
-				  + "]\nhost = \"localhost\"\nport = 8080\nname = 'a # b'\n"
-					"# comment { } , = with \"quotes\"\narr = [1, 2, 3]\n";
-	}
+	std::string toml = gen_toml(target);
 	run_lang<bench::toml_grammar>("toml", toml, mb, iters);
 	bv_toml_dom(toml.data(), toml.size(), iters, mb);
 
 	// --- ini ---
-	std::string ini = repeat_rec("[section]\nkey = value\nnum = 123\n; comment\nother = x\n", target);
+	std::string ini = gen_ini(target);
 	run_lang<bench::ini_grammar>("ini", ini, mb, iters);
 	bv_ini_dom(ini.data(), ini.size(), iters, mb);
 
 	// --- xml ---
-	std::string xml = repeat_rec("<item id=\"1\" name=\"x &amp; y\">alpha</item>", target);
+	std::string xml = gen_xml(target);
 	run_lang<bench::xml_grammar>("xml", xml, mb, iters);
 	bv_xml_dom(xml.data(), xml.size(), iters, mb);
 
 	// --- clike ---
-	std::string clike = repeat_rec("int x; /* c { ; } */ y = 1; // { ; }\n", target);
+	std::string clike = gen_clike(target);
 	run_lang<bench::clike_grammar>("clike", clike, mb, iters);
 
 	std::fprintf(stderr, "[variants] sink=%llu\n", (unsigned long long)g_sink);
