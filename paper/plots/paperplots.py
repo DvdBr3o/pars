@@ -154,18 +154,12 @@ def load_parse(data_dir: Path = DATADIR) -> pd.DataFrame:
 # Two consumer variants: ondemand (lazy index consume) / dom (materialise).
 VARIANT_COLS = ["format", "impl", "variant", "scale_mb", "GBps", "tokens"]
 VARIANT_LABEL = {
+    "index": "index",
     "ondemand": "lazy iterator",
     "dom": "DOM builder",
-    "index": "index (no D2H)",
-    "indexc": "index (overlap)",
 }
-VARIANT_COLOR = {
-    "ondemand": "#4C72B0",
-    "dom": "#55A868",
-    "index": "#8172B3",
-    "indexc": "#C44E52",
-}
-VARIANT_MARKER = {"ondemand": "o", "dom": "s", "index": "^", "indexc": "v"}
+VARIANT_COLOR = {"index": "#8172B3", "ondemand": "#4C72B0", "dom": "#55A868"}
+VARIANT_MARKER = {"index": "^", "ondemand": "o", "dom": "s"}
 
 
 def load_variants(data_dir: Path = DATADIR) -> pd.DataFrame:
@@ -499,7 +493,7 @@ def figure_variant_scaling(variants):
     fig, axes = plt.subplots(nrow, ncol, figsize=FIGSIZE_WIDE, squeeze=False,
                              layout="constrained")
     for ax, f in zip(axes.flat, fmts):
-        for variant in ("indexc", "index", "ondemand", "dom"):
+        for variant in ("index", "ondemand", "dom"):
             d = variants[
                 (variants.format == f) & (variants.impl == "pars") & (variants.variant == variant)
             ].sort_values("scale_mb")
