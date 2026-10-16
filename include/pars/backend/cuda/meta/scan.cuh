@@ -51,7 +51,6 @@ inline void compact_p3(
 		b.oc_excl,
 		n_words,
 		b.struct_idx,
-		b.struct_char,
 		b.oc_struct_pos,
 		b.oc_char
 	);

@@ -366,7 +366,7 @@ __global__ void xor_mask_kernel(std::uint32_t* in, int n_words) {
 __global__ void scatter_kernel(
 	const std::uint8_t* data, const std::uint32_t* struct_out, const std::uint32_t* struct_excl,
 	const std::uint32_t* oc_out, const std::uint32_t* oc_excl, int n_words,
-	std::int32_t* struct_idx, std::uint8_t* struct_char, std::int32_t* oc_struct_pos,
+	std::int32_t* struct_idx, std::int32_t* oc_struct_pos,
 	std::uint8_t* oc_char, std::uint32_t out_base = 0, std::size_t byte_base = 0
 ) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -379,7 +379,6 @@ __global__ void scatter_kernel(
 	while (s) {
 		int b			= __ffs(s) - 1;
 		struct_idx[sb]	= (std::int32_t)(byte_base + (std::size_t)i * 32 + b);
-		struct_char[sb] = p[b];
 		++sb;
 		s &= s - 1;
 	}
@@ -521,7 +520,7 @@ struct DeviceCache {
 				  *oc_excl	  = nullptr;
 	std::int32_t * struct_idx = nullptr, *oc_struct_pos = nullptr, *delta = nullptr, *bal = nullptr;
 	std::int32_t * depth = nullptr, *order = nullptr, *oc_pair = nullptr, *pair_pos = nullptr;
-	std::uint8_t * struct_char = nullptr, *oc_char = nullptr;
+	std::uint8_t * oc_char = nullptr;
 	std::uint64_t *dwt = nullptr, *dpref = nullptr;
 	bool *		   bad = nullptr, *mismatched = nullptr;
 
@@ -550,7 +549,6 @@ struct DeviceCache {
 		f(order);
 		f(oc_pair);
 		f(pair_pos);
-		f(struct_char);
 		f(oc_char);
 		f(dwt);
 		f(dpref);
@@ -605,9 +603,7 @@ struct DeviceCache {
 				cudaFree(p);
 		};
 		f(struct_idx);
-		f(struct_char);
 		malloc_or_die((void**)&struct_idx, n_struct * 4, "cache struct_idx");
-		malloc_or_die((void**)&struct_char, n_struct, "cache struct_char");
 		cap_struct = n_struct;
 	}
 
@@ -840,7 +836,6 @@ device_result scan_device_impl(
 		b.oc_excl,
 		n_words,
 		b.struct_idx,
-		b.struct_char,
 		b.oc_struct_pos,
 		b.oc_char
 	);
@@ -1054,7 +1049,6 @@ chunk_carry scan_chunk_impl(
 		b.oc_excl,
 		n_words,
 		b.struct_idx,
-		b.struct_char,
 		b.oc_struct_pos,
 		b.oc_char,
 		in.out_base,
