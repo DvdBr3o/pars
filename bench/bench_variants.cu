@@ -21,10 +21,12 @@
 #include "grammars/toml.hpp"
 #include "grammars/xml.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
 
@@ -227,6 +229,73 @@ int main(int argc, char** argv) {
 	run_lang<bench::json_grammar>("json", json, mb, iters);
 	bv_simdjson_ondemand(json.data(), json.size(), iters, mb);
 	bv_simdjson_dom(json.data(), json.size(), iters, mb);
+	// pars index-only: H2D + GPU R1-R6, no D2H, no consumer -> exactly cuJSON's
+	// Fig.9 interval (the apples-to-apples comparison).
+	{
+		parser<bench::json_grammar> P;
+		const std::size_t			jn	   = json.size();
+		const std::size_t			padded = (jn + 31) / 32 * 32;
+		std::uint8_t*				dp	   = nullptr;
+		cudaMalloc(&dp, padded);
+		const double g = sample_mean(jn, iters, [&] {
+			cudaMemcpyAsync(dp, json.data(), jn, cudaMemcpyHostToDevice, 0);
+			(void)P.scan_device(dp, jn, 0, false, true);
+		});
+		emit("json", "pars", "index", mb, g, 0);
+		cudaFree(dp);
+	}
+	// pars index, chunked overlap: H2D on stream s1 overlaps scan_chunk on s0
+	// (no D2H).  This is the N2 tier with pipelining — the fix for the gap above.
+	{
+		parser<bench::json_grammar> P;
+		const std::size_t			jn		= json.size();
+		const std::size_t			nchunks = 16;
+		const std::size_t			chunk	= ((jn + nchunks - 1) / nchunks + 31) / 32 * 32;
+		std::uint8_t*				pin		= nullptr;
+		cudaHostAlloc(&pin, jn, cudaHostAllocDefault);
+		std::memcpy(pin, json.data(), jn);
+		std::uint8_t* dev[2] = {nullptr, nullptr};
+		cudaMalloc(&dev[0], chunk);
+		cudaMalloc(&dev[1], chunk);
+		P.reserve(jn);
+		cudaStream_t s0, s1;
+		cudaStreamCreate(&s0);
+		cudaStreamCreate(&s1);
+		cudaEvent_t ev[2];
+		cudaEventCreate(&ev[0]);
+		cudaEventCreate(&ev[1]);
+		auto run = [&] {
+			gpu::chunk_carry carry {};
+			std::size_t		 off = 0;
+			int				 i	 = 0;
+			cudaMemcpyAsync(dev[0], pin, std::min(chunk, jn), cudaMemcpyHostToDevice, s1);
+			cudaEventRecord(ev[0], s1);
+			for (; off < jn; ++i) {
+				const int		  cur = i & 1, nxt = (i + 1) & 1;
+				const std::size_t len = std::min(chunk, jn - off);
+				if (off + len < jn) {
+					const std::size_t noff = off + len, nlen = std::min(chunk, jn - noff);
+					if (i >= 1)
+						cudaStreamWaitEvent(s1, ev[nxt], 0);
+					cudaMemcpyAsync(dev[nxt], pin + noff, nlen, cudaMemcpyHostToDevice, s1);
+					cudaEventRecord(ev[nxt], s1);
+				}
+				cudaStreamWaitEvent(s0, ev[cur], 0);
+				carry = P.scan_chunk(dev[cur], len, carry, s0, off);
+				off += len;
+			}
+			cudaStreamSynchronize(s0);
+		};
+		const double g = sample_mean(jn, iters, run);
+		emit("json", "pars", "indexc", mb, g, 0);
+		cudaFree(dev[0]);
+		cudaFree(dev[1]);
+		cudaFreeHost(pin);
+		cudaStreamDestroy(s0);
+		cudaStreamDestroy(s1);
+		cudaEventDestroy(ev[0]);
+		cudaEventDestroy(ev[1]);
+	}
 
 	// --- csv ---
 	std::string csv = gen_csv(target);
