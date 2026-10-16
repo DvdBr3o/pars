@@ -445,28 +445,41 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 
 def figure_memory(mem):
-    """Device working set of the generated scanner vs the input size."""
+    """Memory footprint vs input, per language: pars (device) vs SOTA (host)."""
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
 
-    fmts = list(dict.fromkeys(mem["format"]))
-    fig, ax = plt.subplots(figsize=FIGSIZE, layout="constrained")
-    for f in fmts:
-        d = mem[mem.format == f].sort_values("scale_mb")
-        ax.plot(d["scale_mb"], d["used_mib"], marker="o", color=PARS_COLOR["N1a"],
-                label=f"pars · {LABELS.get(f, f)} (working set)")
-        ax.plot(d["scale_mb"], d["input_mib"], marker=".", color="#999999",
-                linestyle="--", label="input (1x)")
-    dmax = mem.sort_values("scale_mb").iloc[-1]
-    ax.annotate(f"{dmax['ratio']:.1f}x input", (dmax["scale_mb"], dmax["used_mib"]),
-                textcoords="offset points", xytext=(-6, 6), fontsize="x-small")
-    ax.set_xscale("log")
+    fmts = [f for f in FMT_ORDER if f in set(mem["format"])]
+    impls = ["pars"] + sorted(set(mem["impl"]) - {"pars"})
+    n = len(impls)
+    w = 0.8 / n
+    x = np.arange(len(fmts))
+    fig, ax = plt.subplots(figsize=FIGSIZE_WIDE, layout="constrained")
+    for i, sv in enumerate(impls):
+        vals = []
+        for f in fmts:
+            r = mem[(mem.format == f) & (mem.impl == sv)]["ratio"]
+            vals.append(float(r.iloc[0]) if len(r) else np.nan)
+        col = PARS_COLOR["N1a"] if sv == "pars" else _sota_color(sv)
+        ax.bar(x + (i - (n - 1) / 2) * w, vals, w, color=col, edgecolor="black", linewidth=0.4)
+    ax.axhline(1.0, color="#999999", linestyle="--", linewidth=0.8)
+    ax.text(len(fmts) - 0.6, 1.08, "input (1x)", color="#666666", fontsize="x-small")
     ax.set_yscale("log")
-    ax.set_xticks(sorted(set(mem["scale_mb"])))
-    ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
-    ax.minorticks_off()
-    ax.set_xlabel("input (MB)")
-    ax.set_ylabel("device memory (MiB)")
-    ax.legend(fontsize="small", loc="upper left")
+    ax.set_xticks(x)
+    ax.set_xticklabels([LABELS.get(f, f) for f in fmts])
+    ax.set_ylabel("memory / input (x, log)")
+
+    handles = [Patch(color=PARS_COLOR["N1a"], label="pars (device)")]
+    for f in fmts:
+        s = mem[(mem.format == f) & (mem.impl != "pars")]
+        if len(s):
+            impl = str(s["impl"].iloc[0])
+            handles.append(Patch(color=_sota_color(impl), label=f"{impl} (host · {LABELS.get(f, f)})"))
+    seen: dict[str, object] = {}
+    for h in handles:
+        seen.setdefault(h.get_label(), h)
+    fig.legend(list(seen.values()), list(seen.keys()), ncols=4, fontsize="small",
+               loc="outside lower center")
     return fig
 
 

@@ -202,6 +202,15 @@ target("pars.bench.memory")
     add_files("bench/bench_memory.cu")
     add_includedirs("bench")
     set_languages("cxxlatest")
+
+-- Host-RAM footprint of the SOTA parsers (one language per process).
+target("pars.bench.mem_sota")
+    set_kind("binary")
+    add_files("bench/bench_mem_sota.cpp")
+    add_packages("simdjson", "toml++", "pugixml", "inih")
+    add_includedirs("bench")
+    set_languages("cxxlatest")
+    add_cxxflags("-march=native")
 -- CSV SOTA baseline (simdcsv): Linux-only (POSIX unistd.h / mmap).
 if not is_plat("windows") then
     target("pars.baseline.simdcsv")
