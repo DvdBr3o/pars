@@ -1044,6 +1044,8 @@ chunk_carry scan_chunk_impl(
 	cudaMemcpyAsync(packed, b.excl, 8, cudaMemcpyDeviceToHost, s);
 	if constexpr (kParity)
 		cudaMemcpyAsync(&packed[2], b.in_string + (n_words - 1), 4, cudaMemcpyDeviceToHost, s);
+	cudaStreamSynchronize(s);	// counts are needed before scatter
+	b.ensure_oc(packed[1]);		// per-chunk open/close scratch (chunk-local indices)
 	scatter_kernel<<<grid, BLOCK, 0, s>>>(
 		d_chunk,
 		b.struct_out,
@@ -1116,10 +1118,7 @@ public:
 
 	// Chunked stage-1 (parity path): caller preallocates the output with
 	// reserve_struct(total) then calls scan_chunk per chunk.
-	void reserve_struct(std::size_t cap) const {
-		cache_.ensure_struct(cap);
-		cache_.ensure_oc(cap);	// scan_chunk writes the open/close arrays too
-	}
+	void		reserve_struct(std::size_t cap) const { cache_.ensure_struct(cap); }
 
 	chunk_carry scan_chunk(
 		const std::uint8_t* d_chunk, std::size_t n, chunk_carry in, cudaStream_t s = 0,
