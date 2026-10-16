@@ -144,21 +144,37 @@ include/pars/core/lower.hpp        文法 -> plan（含 X (op X)* 的 tree 检�
 include/pars/core/host.hpp         host 执行器（prefix_reduce 驱动）
 include/pars/core/tree.hpp         tree schema（host reduce）
 include/pars/core/cuda.hpp         GPU：finite/stack 扫描 + tree 归约
+include/pars/scan.hpp              统一 API：pars::scan<Grammar>(bytes, opts)
+                                   （placement + consumer 都是策略值）
 ```
 
 测试：`pars.test.model / algebra / core / meta / meta.gpu` 全部通过。
 
-### 8.2 评测口径：两个 consumer 变体（取代旧的 N1/N2/N3 传输层）
+### 8.2 评测口径：一个实现 + 两个 consumer 变体
+
+**只有一个实现**：`pars::scan<Grammar>(bytes, opts)`。placement 与 consumer 都是策略值，
+面向**所有** schema——因为四种 schema 都是幺半群，"分块 carry" 就是它们各自的前缀积元素，
+所以流式重叠（chunked overlap）**可以泛化到所有 PEG 文法**，无需 per-schema 特化。
 
 ```
-variant = ondemand : GPU 结构索引 + 用户 lazy 迭代器（不建 DOM）
-variant = dom      : GPU 结构索引 + DOM 构建（物化全部节点）
+pars::scan<G>(bytes, opts)      // 流式（H2D 与 prefix_reduce 重叠）
+pars::scan_device<G>(ptr, n)    // device-resident（零拷贝）
+result.visit(bytes, visitor)    // consumer
+opts: chunks / to_host / copy_in / pinned / pairs
 ```
 
-Baseline（按语言匹配）：simdjson `ondemand`/`dom`（JSON）、toml++（TOML）、
-pugixml（XML）、inih（INI）。**数据**：JSON 用**真实语料**（SF city-lots GeoJSON，
-按顶层 feature 切片为 8/16/32/64/128/256/512 MB 的合法顶层数组）；其余语言用
-"每条记录都不同"的有效生成器（非机械重复）。
+报告两个 consumer 变体（取代旧的 N1/N2/N3 传输层）：
+
+```
+variant = ondemand : pars::scan + 用户 lazy 迭代器（不建 DOM）
+variant = dom      : pars::scan + DOM 构建（物化全部节点）
+variant = index    : pars::scan 但结果留显存（无 D2H）——与 cuJSON 同 interval
+```
+
+Baseline（按语言匹配）：simdjson `ondemand`/`dom`（JSON）、cuJSON（JSON，index）、
+toml++（TOML）、pugixml（XML）、inih（INI）。**数据**：JSON 用**真实语料**
+（SF city-lots GeoJSON，切片为 8/16/32/64/128/256/512 MB 的合法顶层数组）；
+其余语言用"每条记录都不同"的有效生成器。
 
 ### 8.3 设备侧指标（A100-40GB）
 
@@ -169,18 +185,22 @@ pugixml（XML）、inih（INI）。**数据**：JSON 用**真实语料**（SF ci
 | tree schema 归约（device, R7） | **48.2 GB/s** |
 | 显存工作集 | 7–9× → ≈2.9× 输入（−380 MiB） |
 
-### 8.4 JSON 两个变体（真实语料，GB/s）
+### 8.4 JSON（真实语料，GB/s）
 
-| MB | pars·lazy | pars·DOM | simdjson·ondemand | simdjson·dom |
-| --- | --- | --- | --- | --- |
-| 8 | 1.88 | 0.64 | 0.52 | 0.58 |
-| 32 | 2.43 | 0.68 | 0.52 | 0.56 |
-| 128 | 2.37 | 0.69 | 0.51 | 0.53 |
-| 512 | 2.46 | 0.70 | 0.51 | 0.53 |
+`pars·index` = 统一 API 的流式重叠、结果留显存（无 D2H），与 **cuJSON 同 interval**：
 
-结论：`ondemand` 上 pars ≈ **4.7×** simdjson；`dom` 上 pars ≈ **1.3×** simdjson；跨 scale 平稳。
-其他语言（pars·DOM vs 各自 DOM 解析器）：TOML ~34×、INI ~5×、XML ~1.3×。
+| MB | pars·index | cuJSON | ratio |
+| --- | --- | --- | --- |
+| 64 | **10.37** | 7.56 | 1.37× |
+| 256 | **18.98** | 11.32 | 1.68× |
+| 512 | **20.14** | 13.45 | 1.50× |
 
-> 状态：`finite` / `stack` / `tree` / `choice`(判别性) 已实现并有 GPU 后端；
-> `interval` 兜底与多模式 fusion/carry 为待办（不影响 §0–§6 的代数正确性）。
-> 图：`paper/src/figures/fig_variants.*`、`fig_variant_scaling.*`（数据 `paper/plots/data/variants.csv`）。
+在 cuJSON 自己的 interval 上 **pars 反超**（设备侧前缀扫描本就更快，一旦 H2D 与计算重叠即胜）。
+两个 consumer 变体（`ondemand` / `dom`）是**主机边界**口径，仍受 D2H（全量索引回传）限制；
+对 simdjson `ondemand`/`dom` 仍为领先。其他语言（pars·DOM vs 各自 DOM 解析器）：
+TOML ~34×、INI ~5×、XML ~1.3×。
+
+> 图：`paper/src/figures/fig_variants.*`（两 consumer 变体 + cuJSON）、
+> `fig_variant_scaling.*`（index/ondemand/dom 随 scale）。数据 `paper/plots/data/variants.csv`。
+>
+> 状态：`finite` / `stack` / `tree` / `choice`(判别性) 已实现并有 GPU 后端；`interval` 兜底为待办。
