@@ -98,14 +98,14 @@ int main(int argc, char** argv) {
 		simdjson::dom::element	root;	 // keep the DOM resident during sampling
 		measure("json", "simdjson", doc.size(), mb, [&] {
 			if (!p.parse(doc).get(root)) g_sink = g_sink + static_cast<std::size_t>(root.type());
-		}});
+		});
 	} else if (lang == "toml") {
 		std::string	 doc = bp::gen_toml(tgt);
 		toml::table	 t;	 // keep the table resident during sampling
 		measure("toml", "toml++", doc.size(), mb, [&] {
 			t = toml::parse(doc);
 			g_sink = g_sink + t.size();
-		}});
+		});
 	} else if (lang == "xml") {
 		std::string			doc = bp::gen_xml(tgt);
 		pugi::xml_document	pd;	 // one DOM, kept alive (pars reuses its buffers)
@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 			pd.reset();
 			pugi::xml_parse_result r = pd.load_buffer(doc.data(), doc.size());
 			g_sink = g_sink + static_cast<std::size_t>(r.status) + pd.child("item").attribute("id").as_uint();
-		}});
+		});
 	} else if (lang == "ini") {
 		std::string										doc = bp::gen_ini(tgt);
 		std::unordered_map<std::string, std::string>	m;	 // the real consumer
@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
 				return 1;
 			}, &m);
 			g_sink = g_sink + m.size();
-		}});
+		});
 	}
 	return 0;
 }
