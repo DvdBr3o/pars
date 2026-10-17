@@ -43,8 +43,9 @@ namespace bp = bench_payloads;
 // so this probe can measure the index it builds.  Linux-only (the generated
 // lexer uses unistd.h), like the other flex/simdcsv targets.
 #ifndef _WIN32
-extern std::vector<std::uint32_t> g_pos;
-extern const char*				  g_base;
+// The generated lexer declares these as extern; the owning TU must define them.
+std::vector<std::uint32_t> g_pos;
+const char*				   g_base = nullptr;
 struct yy_buffer_state;
 extern int				yylex(void);
 extern yy_buffer_state* yy_scan_bytes(const char*, int);
