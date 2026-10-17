@@ -5,10 +5,9 @@
 // footprint as a ratio of the input.
 //
 // FAIRNESS RULES (see docs/model/bench_memory.md):
-//   * The reported number is the parser's RETIRED working set, not the first
-//     allocation's bump.  We warm up, snapshot RSS, then run `iters` parses,
-//     snapshot RSS again, and report the STEADY-STATE growth.  Fresh
-//     alloc/free inside the loop no longer counts as footprint.
+//   * The reported number is the REsident growth of a LIVE parse: build the
+//     object model once, then sample /proc/self/statm.  A short-lived DOM that
+//     is freed before the sample would report ~0.
 //   * Every baseline builds the object model it is known for:
 //       simdjson  -> dom::element (full DOM)
 //       toml++    -> toml::table
@@ -61,19 +60,23 @@ static long resident_kb() {
 }
 
 template<class Run>
-static void measure(const char* fmt, const char* impl, std::size_t n, Run&& run, int iters) {
-	for (int i = 0; i < 2; ++i) run();	 // warm up
+static void measure(const char* fmt, const char* impl, std::size_t n, std::size_t mb, Run&& run) {
+	// `run()` must keep the object model it builds alive (e.g. store it in a
+	// captured variable), so we sample RSS while the DOM is resident.  The
+	// footprint is the RSS growth of a live parse, not the bump of a
+	// short-lived allocation that is freed before we look.  We build exactly
+	// once: a second build would accumulate a second DOM in RSS.
 	const long before = resident_kb();
-	for (int i = 0; i < iters; ++i) run();
-	const long after = resident_kb();
+	run();
+	const long during = resident_kb();
 
 	const double input_mib = static_cast<double>(n) / 1048576.0;
-	const double used_mib  = static_cast<double>(after - before) / 1024.0;
+	const double used_mib  = static_cast<double>(during - before) / 1024.0;
 	std::printf(
 		"%s,%s,host,%zu,%.1f,%.1f,%.2f\n",
 		fmt,
 		impl,
-		n / 1048576,
+		mb,
 		input_mib,
 		used_mib,
 		used_mib / input_mib
@@ -86,35 +89,35 @@ int main(int argc, char** argv) {
 	const std::string lang = argv[1];
 	const std::size_t mb   = std::strtoull(argv[2], nullptr, 10);
 	const std::size_t tgt  = mb * 1024 * 1024;
-	const int		  iters = 5;
 
 	std::printf("# format,impl,placement,scale_mb,input_mib,used_mib,ratio\n");
 
 	if (lang == "json") {
-		std::string			   doc = bp::gen_json(tgt);
-		simdjson::dom::parser  p;
-		measure("json", "simdjson", doc.size(), [&] {
-			simdjson::dom::element root;
+		std::string				doc = bp::gen_json(tgt);
+		simdjson::dom::parser	p;
+		simdjson::dom::element	root;	 // keep the DOM resident during sampling
+		measure("json", "simdjson", doc.size(), mb, [&] {
 			if (!p.parse(doc).get(root)) g_sink = g_sink + static_cast<std::size_t>(root.type());
-		}, iters);
+		}});
 	} else if (lang == "toml") {
-		std::string	   doc = bp::gen_toml(tgt);
-		measure("toml", "toml++", doc.size(), [&] {
-			toml::table t = toml::parse(doc);
+		std::string	 doc = bp::gen_toml(tgt);
+		toml::table	 t;	 // keep the table resident during sampling
+		measure("toml", "toml++", doc.size(), mb, [&] {
+			t = toml::parse(doc);
 			g_sink = g_sink + t.size();
-		}, iters);
+		}});
 	} else if (lang == "xml") {
-		std::string		   doc = bp::gen_xml(tgt);
-		pugi::xml_document pd;	 // reused across iterations, like pars' buffers
-		measure("xml", "pugixml", doc.size(), [&] {
+		std::string			doc = bp::gen_xml(tgt);
+		pugi::xml_document	pd;	 // one DOM, kept alive (pars reuses its buffers)
+		measure("xml", "pugixml", doc.size(), mb, [&] {
 			pd.reset();
 			pugi::xml_parse_result r = pd.load_buffer(doc.data(), doc.size());
 			g_sink = g_sink + static_cast<std::size_t>(r.status) + pd.child("item").attribute("id").as_uint();
-		}, iters);
+		}});
 	} else if (lang == "ini") {
-		std::string									   doc = bp::gen_ini(tgt);
-		std::unordered_map<std::string, std::string>   m;	 // the real consumer
-		measure("ini", "inih", doc.size(), [&] {
+		std::string										doc = bp::gen_ini(tgt);
+		std::unordered_map<std::string, std::string>	m;	 // the real consumer
+		measure("ini", "inih", doc.size(), mb, [&] {
 			m.clear();
 			ini_parse_string(doc.c_str(), [](void* u, const char* s, const char* n, const char* v) {
 				auto* mm = static_cast<std::unordered_map<std::string, std::string>*>(u);
@@ -122,7 +125,7 @@ int main(int argc, char** argv) {
 				return 1;
 			}, &m);
 			g_sink = g_sink + m.size();
-		}, iters);
+		}});
 	}
 	return 0;
 }
