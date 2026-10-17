@@ -484,11 +484,18 @@ target("pars.paper.data")
             if not os.isfile(jf) then
                 os.execv(pyp, {path.join(root, "bench", "gen_json.py"), tostring(mem_scale), jf})
             end
-            local ok, out = pcall(function ()
-                return os.iorunv(pyp, {path.join(root, "bench", "measure_child_gpu.py"),
-                                       "0", cj, "-b", jf})
-            end)
-            local used = ok and tonumber(out:match("(%d+)")) or nil
+            local used = nil
+            local ok_out = nil
+            try {
+                function ()
+                    ok_out = os.iorunv(pyp, {path.join(root, "bench", "measure_child_gpu.py"),
+                                             "0", cj, "-b", jf})
+                end,
+                catch { function (e) end }
+            }
+            if ok_out then
+                used = tonumber(ok_out:match("(%d+)"))
+            end
             if used then
                 local input_mib = mem_scale
                 mem[#mem + 1] = string.format("json,cujson,device,%d,%.1f,%.1f,%.2f",
