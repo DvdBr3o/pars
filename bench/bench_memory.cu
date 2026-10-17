@@ -61,19 +61,31 @@ namespace {
 template<class Run>
 void measure(const char* fmt, const char* impl, const char* placement, std::size_t mb,
 			 std::size_t input_bytes, Run&& run, int iters) {
-	// Warm up: the first call performs the persistent allocations.
+	// Free VRAM before the scanner's persistent buffers exist.
+	cudaDeviceSynchronize();
+	const std::size_t before = free_mib();
+	// Warm up: the first calls perform (and grow) the persistent allocations.
 	for (int i = 0; i < 2; ++i)
 		run();
+	cudaDeviceSynchronize();
+	// Steady-state working set: everything the scanner keeps resident after the
+	// caches have reached their high-water mark.  Running more iterations must
+	// not change this, which is why we do not report the first-call growth.
+	const std::size_t after = free_mib();
+	const double input_mib = static_cast<double>(input_bytes) / 1048576.0;
+	const double used_mib  = static_cast<double>(before - after);
 
-	const std::size_t base = free_mib();
-	std::size_t		  lo   = base;
+	// Invariant check: extra iterations stay within the measured footprint.
+	std::size_t lo = after;
 	for (int i = 0; i < iters; ++i) {
 		run();
 		cudaDeviceSynchronize();
 		lo = std::min(lo, free_mib());
 	}
-	const double input_mib = static_cast<double>(input_bytes) / 1048576.0;
-	const double used_mib  = static_cast<double>(base - lo);
+	if (lo < after)
+		std::fprintf(stderr, "[mem] %s/%s grew %.1f MiB after warmup\n", fmt, placement,
+					 static_cast<double>(after - lo));
+
 	std::printf(
 		"%s,%s,%s,%zu,%.1f,%.1f,%.2f\n",
 		fmt,
