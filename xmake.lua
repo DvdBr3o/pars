@@ -223,6 +223,7 @@ if not is_plat("windows") then
     target("pars.bench.mem_simdcsv")
         set_kind("binary")
         add_files("bench/bench_mem_simdcsv.cpp")
+        add_files("third_party/simdcsv/io_util.cpp")
         add_includedirs("third_party/simdcsv")
         add_cxxflags("-march=native", "-include cstdint", {force = true})
         set_languages("cxxlatest")
