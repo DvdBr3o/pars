@@ -1,251 +1,279 @@
-# 𝔖′ 幻灯片（只讲理论模型）
+# 𝔖′ 幻灯片（理论 ↔ 源码 template IR rewrite）
 
-> 分两部分：**A. 模型总览**（一页式概括 + 定义 + 定理 + 判据 + 四 schema），
-> **B. By case 全流程**（拿一个具体 JSON 输入，从文法一步步走到输出，理解整个模型）。
-
----
-
-# Part A · 模型总览
+> 每一页左边是理论对象，右边是它在 pars 源码里的**模板匹配（match）→ IR 重写（rewrite）→ 执行**。
+> 目录：A 总览 / B 一个原语 / C 四种 schema 的 rewrite / D by-case 全流程 / E 执行后端。
 
 ---
 
-# Slide A1 — 一句话
+# Part A · 总览：理论对象 ↔ 源码
 
-## 解析 = 一个同态
+# Slide A1 — 一张对照表
 
-> **一个确定性解析器，就是自由词幺半群 `(Σ*, ++, ε)` 到某个"摘要幺半群" `(S, ⊗, e)`
-> 的一个同态。** 解析就是把输入的逐字节摘要**用 ⊕ 折叠（前缀积）**。
+| 理论对象 | 源码 | 关键符号 |
+| --- | --- | --- |
+| 摘要幺半群 + 前缀积 | `include/pars/algebra/summary.hpp` | `Summary`、`prefix_reduce` |
+| 四种 schema 的实例 | 同上 | `state_map` / `bracket_balance` / `reducer` / `ranked_choice` |
+| IR：schema + cell | `include/pars/core/plan.hpp` | `enum schema`、`struct cell`、`struct plan` |
+| 文法 → IR 的 rewrite | `include/pars/core/lower.hpp` | `lower<G>()`、`tree_scan`、`monoid_op` |
+| 词法 DFA（rewrite 的输入） | `include/pars/compile/automaton.hpp` | `reify`、`der`、`build_dfa` |
+| 递归/括号/标点的分析 | `include/pars/compile/plan.hpp` | `bracket_guard`、`first_terms`、`collect_lits` |
+| 统一 API | `include/pars/scan.hpp` | `scan<G>`、`scan_device<G>`、`scan_result` |
+| 执行（host / GPU） | `core/host.hpp`、`core/tree.hpp`、`core/cuda.hpp` | `scan<P>`、`reduce<P>`、`to_scan_plan<P>` |
 
-```
-σ(i,k) = σ(i,j) ⊗ σ(j,k)          // 同态：段摘要可结合合并
-σ(0,n) = τ₀ ⊗ τ₁ ⊗ … ⊗ τ_{n-1}    // 整段 = 逐字节元素的前缀积
-```
-
-**框架只有三样东西**：
-
-1. 一个概念：**区间摘要 `σ`**（一段字节"对解析器意味着什么"）
-2. 一个原语：**`prefix_reduce`**（并行前缀积，`O(n)` work / `O(log n)` depth）
-3. 一个判据：**摘要可压缩**（决定能不能并行、有多快）
-
----
-
-# Slide A2 — 定义
-
-**定义 1（摘要）** `σ(i,j) ∈ S`：区间 `[i,j)` 的"净效果"。
-
-**定义 2（幺半群）** `(S, ⊗, e)`：`⊗` 结合、`e` 为单位元。
-> 结合律是并行性的**唯一来源**——它允许任意重新括起，不必从左到右顺序合并。
-
-**定义 3（同态）** `σ` 是自由词幺半群到 `(S,⊗,e)` 的同态：
-
-```
-σ(x ++ y) = σ(x) ⊗ σ(y)      σ(ε) = e
-```
-
-**运行期状态（关键）**：处理字节 `i` 之前的状态 = **前缀摘要 `σ(0,i)`**。
-在不在字符串内、栈里有什么、归约值……一切都是"读前缀摘要"。
+**一句话**：`lower<G>()` 把文法**重写成** `plan = { cell(schema, …) }`；执行器把每个 cell 变成逐字节元素 `τ_b`，一次 `prefix_reduce`。
 
 ---
 
-# Slide A3 — 主定理与并行
+# Part B · 一个原语
 
-**定理（前缀积）** 设 `τ_b ≜ σ(i,i+1)`，则 `σ(0,n) = τ_{b₀} ⊗ … ⊗ τ_{b_{n-1}}`。
-（对 `n` 归纳，用定义 3 展开即可。）
+# Slide B1 — `Summary` 概念与 `prefix_reduce`
 
-**并行推论** 前缀积 = Hillis–Steele 前缀扫描：
+理论：解析 = 幺半群同态 ⇒ 前缀积 = 并行前缀扫描。
 
 ```cpp
+// algebra/summary.hpp
+template<class S>
+concept Summary = requires(const S& a, const S& b) {
+    { S::compose(a, b) } -> std::same_as<S>;   // ⊗（结合）
+    { S::identity() }    -> std::same_as<S>;   // e
+};
+
 template<Summary S>
-void prefix_reduce(S* p, size_t n) {          // O(n) work, O(log n) depth
-    for (size_t d = 1; d < n; d <<= 1)
-        for (size_t i = n; i-- > d;)
-            p[i] = S::compose(p[i-d], p[i]);
+void prefix_reduce(S* p, std::size_t n) {      // 唯一并行原语
+    for (std::size_t d = 1; d < n; d <<= 1)
+        for (std::size_t i = n; i-- > d;)
+            p[i] = S::compose(p[i - d], p[i]);
 }
 ```
 
-**整个模型只有这一个并行原语。** 不同文法的差别只剩：`S` 是什么、`τ_b` 怎么取。
+四个实例（同文件）就是四种 `S`：
+
+```cpp
+state_map<NS>          // finite : Q->Q 变换
+bracket_balance        // stack  : (未配对闭, 未配对开)
+reducer<V,Op>          // tree   : (has,v) + op
+ranked_choice<V>       // choice : (matched,rank,v) + min
+```
+
+**这是整个框架唯一的并行原语**；后端只是把它搬到 GPU（`thrust::inclusive_scan` / `TCompose64`）。
 
 ---
 
-# Slide A4 — 唯一判据：可压缩性
+# Part C · 四种 schema 的 template rewrite
 
-主定理对**任何**幺半群成立，但 `S` 的元素可能无界（栈/回溯），那样并行就退化。
+# Slide C1 — 文法 AST（被匹配的对象）
 
-**定义 4（可压缩）** 存在幺半群 `M` 与满同态 `π:Σ*↠M`，`σ` 经 `M` 因子化且 `M` 元素**有界**。
-
-```
-可压缩  ⇒ prefix_reduce ⇒ O(n) work, O(log n) depth, O(1) 元素
-不可压缩 ⇒ 摘要无界      ⇒ 区间不动点, O(n²)（兜底）
+```cpp
+// dsl.hpp
+eps   any   lit<'c'>   cls<Cs...>   seq<...>   alt<...>   rep<G,Min,Max>   notp<G>   rule<Tag>
 ```
 
-**这是唯一的判据**：一个文法"能不能并行、有多快" = "它的摘要落在哪个幺半群"。
-没有模式匹配，没有启发式。
+`lower<Grammar>()` 对每条 `rule<Tag>` 的 `def<Tag>::type` 做**模板匹配**，决定 schema。
+匹配结果写进 IR：
+
+```cpp
+// core/plan.hpp
+enum class schema : uint8_t { finite, stack, tree, choice, interval };
+
+struct cell {                       // 一个 summary 生成器
+    schema sch;
+    std::array<uint8_t,256> rep_of; // byte -> class
+    uint8_t n_states, n_classes, start;
+    uint8_t trans[8][8], masked[8][8];   // finite
+    char open, close;                    // stack
+    char op;                             // tree
+    …
+};
+struct plan { cell cells[8]; uint8_t n_cells; char atoms[8]; … };
+```
+
+每个 schema 就是**一组固定的 IR 字段**——这是 rewrite 的靶子。
 
 ---
 
-# Slide A5 — 四种 schema（可压缩的四种方式）
+# Slide C2 — rewrite 1：正则词法 → `finite` cell
 
-| schema | 幺半群 `S` | 覆盖 | 元素大小 |
-| --- | --- | --- | --- |
-| `finite` | 有限变换幺半群 `Q→Q`（DFA） | 正则词法（引号/转义/注释/数字） | 有界（`Q` 有限） |
-| `stack` | 差列表/栈幺半群（Levien） | visibly-pushdown（括号、call/return） | `(taken,given)`，O(1) |
-| `tree` | 结合幺半群 | 单自递归 `e op e`、`A (op A)*` | 单个值，O(1) |
-| `choice` | 优先级 `min` 幺半群 | PEG ordered choice `/`（判别性） | 名次+值，O(1) |
-| `interval` | —（不可压缩） | 无界回溯、非良嵌套、无界前瞻 | — |
+**匹配**：非递归规则的规则体（`lit`/`cls`/`seq`/`alt`/`star`/受支持的 `notp`）。
 
-**四者都由同一个 `prefix_reduce` 计算。** `interval` 是唯一兜底。
+```cpp
+// compile/automaton.hpp
+reify<Grammar, lit<'c'>>          -> rk::ch           // 正则表达式（arena）
+reify<Grammar, cls<Cs...>>        -> rk::set
+reify<Grammar, seq<notp<cls<S>>, any>> -> rk::set(补集)   // 唯一支持的 notp 形态
+der(A, id, c)                     -> 导数             // Brzozowski
+build_dfa(A, root)                -> dfa { trans, accepting, rep_of }
+```
 
-> PEG 保留的原因：`/` 是结合的（`(A/B)/C=A/(B/C)`），"取第一个成功"= 对成功者取 `min(rank)`，
-> 这是幺半群——所以 PEG 不比 CFG 难代数化，反而摘要更小。
+**重写**（`core/lower.hpp` → `make_desc`）：DFA → `cell{finite}`
+
+```cpp
+cell c; c.sch = schema::finite;
+c.rep_of = dd.rep_of;  c.trans = dd.trans;  c.masked = dd.masked;
+c.start  = dd.start;   c.n_states = dd.n_states;
+```
+
+**执行**：`state_map<NS>`（DFA 转成变换幺半群）→ `prefix_reduce`。
 
 ---
 
-# Part B · By case 全流程
+# Slide C3 — rewrite 2：递归 + 两端字面量 → `stack` cell
+
+**匹配**：递归规则、且顶层 `seq` 恰有两个字面量端点（首/尾、互异、递归在中间）。
+
+```cpp
+// compile/plan.hpp
+template<class Grammar, class... Gs>
+struct bracket_guard<Grammar, seq<Gs...>> {
+    static constexpr char open  = first_c();
+    static constexpr char close = last_c();
+    static constexpr bool ok =
+        (N >= 3) && first_lit() && last_lit() && (nlits == 2) && (open != close);
+};
+```
+
+**重写**（`core/lower.hpp`）：
+
+```cpp
+cell c; c.sch = schema::stack; c.open = b.open; c.close = b.close;
+```
+
+**执行**：`bracket_balance`（单类型退化为 `(闭,开)`）→ `prefix_reduce` → 深度 → 排序配对。
+多类型时在配对处做类型校验（`match_brackets`）。
 
 ---
 
-# Slide B1 — 选一个输入，走完整条流水线
+# Slide C4 — rewrite 3：单自递归 + 结合算子 → `tree` cell
 
-**输入** `{"a":"b"}`（9 字节）：
+**匹配**：递归、非 bracket-guarded、且规则体是 `X (op X)*`（`rep` 里含唯一字面量算子）。
 
-```
-index: 0    1    2    3    4    5    6    7    8
-byte : {    "    a    "    :    "    b    "    }
-```
-
-**全流程 = 四步**：
-
-```
-文法 G ──lower──▶ plan = { cell(schema, …) } ──τ_b──▶ 逐字节元素
-       ──prefix_reduce──▶ 前缀摘要 ──读状态──▶ 掩码/深度 ──输出算子──▶ 结构索引 / 配对 / 归约
+```cpp
+// core/lower.hpp（detail）
+op_ch<lit<C>>            -> C
+elem_op<seq<A,B>>        -> op_ch<A> ? op_ch<A> : op_ch<B>
+rep_op<rep<G,Min,Max>>   -> elem_op<G>::value
+any_rep_op<Gs...>        -> 取第一个非零
+monoid_op<seq<Gs...>>    -> any_rep_op<Gs...>::value     // 得到 op，如 '+'
 ```
 
-下面三页按这四步走：**(1) 文法→cell**、**(2) 元素→前缀积**、**(3) 读状态→输出**。
+**重写**：
+
+```cpp
+if (op != 0) { cell c; c.sch = schema::tree; c.op = op; P.cells[P.n_cells++] = c; }
+```
+
+**执行**：`reducer<V,Op>`（`Op` 可结合）→ `prefix_reduce`；GPU 走 `tree_reduce_gpu<Op>`。
 
 ---
 
-# Slide B2 — 步骤 1：文法 → cell（选 schema）
+# Slide C5 — rewrite 4：判别性 `alt` → `finite`
 
-文法片段：
+**理论事实**：PEG `/` 结合、但**不分配于连接**；"取第一个成功" = 对成功者取 `min(rank)`。
 
+**匹配/重写**：若各备选首字符集在有界窗口内不相交（判别性），`alt` 退化为**并集 DFA**
+（`r_alt` 做 ACI 排序去重 → 语言并集），于是落到 `finite` cell：
+
+```cpp
+// automaton.hpp
+r_alt(A, a, b)   // 拍平 + 去重（集合语义）
+// 判别性时刻画的是同一个 DFA；非判别性（需回溯）⇒ 不满足可压缩，落 interval
 ```
-object ::= '{' ws [members] '}'          // 递归、顶层两端是 '{' '}'
-string ::= '"' ( '\\' any | [^"\\] any )* '"'   // 正则
-member ::= string ws ':' ws value
-value  ::= object | array | string | number | true | false | null
-```
 
-`lower<G>()` 对每条规则选 schema：
-
-| 规则 | 匹配到什么 | schema | 摘要元素 `S` |
-| --- | --- | --- | --- |
-| `string` | 正则 DFA（首字节 `"`，有前缀转义 `\`） | `finite` | 3 状态变换 `Q→Q` |
-| `object` | 递归、顶层恰两个字面量 `{` `}` | `stack` | `(未配对闭, 未配对开)` |
-| `:` `,` | 结构规则里的独立字面量 | atom | — |
-| `value` 的多个备选 | 判别性 choice（首字符集不相交） | 并入 `finite` | — |
-
-→ `plan = { finite(string), stack({}), atoms{: ,} }`
+**执行**：与 `finite` 完全相同（同一个 `state_map` + `prefix_reduce`）。
+非判别性 ⇒ `interval`（区间不动点，`O(n²)`，兜底）。
 
 ---
 
-# Slide B3 — 步骤 2：逐字节元素 + 前缀积
+# Part D · By case 全流程（源码级）
 
-`finite(string)` 的字节变换 `τ_b`（状态 `0=外, 1=内, 2=转义`）：
+# Slide D1 — `{"a":"b"}` 从文法到索引
 
+**输入** `{"a":"b"}`；`lower<json_grammar>()` 的匹配结果：
+
+| 规则 | match | rewrite → cell |
+| --- | --- | --- |
+| `string` | 正则 DFA（首字节 `"`，前缀转义 `\`） | `cell{finite}` |
+| `object` | `bracket_guard`：顶层 `{` `}` | `cell{stack, '{', '}'}` |
+| `:` `,` | `collect_lits`（独立字面量） | `plan.atoms` |
+| `value` 的 alt | 判别性（首字节不相交） | 并入 `finite` |
+
+```cpp
+static constexpr auto P = core::lower<bench::json_grammar>();
+// P.cells = { finite(string), stack({}) }, P.atoms = { ':', ',' }
 ```
-τ_'"' : 0→1, 1→0               (翻转)
-τ_'\\': 1→2                    (进入转义)
-τ_其他: 2→1, 其余保持          (被转义字节消费)
-```
-
-对每个字节取 `τ_b`，做 **prefix_reduce**（前缀复合）：
-
-```
-bytes :  {    "    a    "    :    "    b    "    }
-τ_b   :  1   flip keep flip keep flip keep flip  1
-前缀摘要(入口 0): 0   0    1    1    0    0    1    1    0
-                         ↑    ↑              ↑    ↑
-                      在串内 在串内        在串内 在串内
-```
-
-**读前缀摘要**即得 "处理字节前是否在串内"：`in = 0 0 1 1 0 0 1 1 0`。
-
-（这就是 `prefix_xor` / escape scan 的一般形式：`finite` 上的前缀积。）
 
 ---
 
-# Slide B4 — 步骤 3：读状态 → 掩码 → 结构索引
+# Slide D2 — 逐字节元素 → `prefix_reduce` → 掩码
 
-**掩码**：被进行中的 token 消费的字节 = `in`。去掉掩码后，只留结构原子/括号：
+**执行器**：`core/host.hpp::scan<P>()`（GPU 对应 `core/cuda.hpp` + `pipeline.cuh`）。
 
-```
-bytes :    {    "    a    "    :    "    b    "    }
-in    :    0    0    1    1    0    0    1    1    0
-结构? :    {        ✗    ✗    :         ✗    ✗    }     ← 被 in 掩掉的字符串内部/引号
-结构索引 = [ { : } ]  (byte offsets 0, 4, 8)
-```
-
-**括号配对**（`stack` schema，同一个 `prefix_reduce`）：
-
-```
-bytes :   {                                        }
-增量  :  +1                                       -1
-深度  :   1   1    1    1    1    1    1    1      0     ← 前缀和
-按深度稳定排序 + 相邻配对 ⇒ { (0) ↔ } (8)
+```cpp
+using SM = algebra::state_map<kMaxStates>;
+for (i) { SM e = SM::identity(); for (s<n_states) e.f[s] = cell.trans[s][rep_of[b]]; p[i]=e; }
+algebra::prefix_reduce(p.data(), n);                    // ⊗ = compose
+// 读前缀摘要：处理字节 i 之前的状态 = (i==0? start : p[i-1].f[start])
 ```
 
-**输出算子**（与 schema 无关）：`compact`（popcount+scan+scatter）把结构位置收成一个索引数组。
+对 `{"a":"b"}` 的 string cell：
 
-→ 结果：`structural = [0,4,8]`，`pair = {0↔8}`。**全程只用了 `prefix_reduce` + 输出算子。**
+```
+byte:        {    "    a    "    :    "    b    "    }
+state before: -    0    1    1    0    0    1    1    0
+mask(in)   : -    0    1    1    0    0    1    1    0
+```
 
 ---
 
-# Slide B5 — 步骤 4：消费者（模型之外，但由索引驱动）
+# Slide D3 — 输出算子：结构索引 + 配对
 
-索引是**模型输出**；语义由用户 visitor 消费（lazy 迭代 / DOM 构建）：
+```cpp
+// core/host.hpp
+if (masked) continue;
+if (structural_table<P>()[b]) { out.pos.push_back(i); out.ch.push_back(b); }
 
+// stack cell 的深度 + 配对（模型里是 R6；源码在 GPU 是 depth_init→scan→sort→pair）
 ```
-structural_view { pos=[0,4,8], pair=[2,?,0]? , n=3 }
-replay(bytes, view, visitor):
-   scalar(begin, p)      // 非结构字节段 = 值/键
-   symbol(p, byte, match)// 结构字节 + 配对的括号
-```
 
-→ 同一个索引，既可 `ondemand`（按需取字段），也可 `dom`（物化全部节点）。
-**模型只管到"结构索引"这一步；语义在模型外。**
+结果：`structural = [0,4,8]`（`{` `:` `}`），`pair = {0↔8}`。
+**全程只有 `prefix_reduce` + 与 schema 无关的输出算子（popcount+scan+scatter / 排序配对）。**
 
 ---
 
-# Slide B6 — 其它 case：同一模板
+# Part E · 执行后端（同一 IR，不同放置）
 
-| case（规则形态） | 匹配到什么 | schema | `τ_b` / `⊗` | 读出的状态 |
-| --- | --- | --- | --- | --- |
-| 字符串 `"…"` | 正则 DFA | `finite` | 状态变换 / 复合 | 在不在串内 |
-| 括号 `( … )` | 递归、两端两字面量 | `stack` | `(taken,given)` / 归约 | 深度 → 配对 |
-| `1+2+3`、`e op e` | 单自递归、`op` 可结合 | `tree` | `(has,v)` / `op` | 归约值 |
-| `A / B`（判别性） | 首字符集不相交 | `choice` | `(matched,rank,v)` / `min` | 选中的备选 |
-| 需要回溯的规则 | 摘要有界？否 | `interval` | —（不动点） | — |
+# Slide E1 — 一个 API，三种放置
 
-**同一个 `prefix_reduce`，同一个"读前缀摘要"动作**；差别只在 `S`、`e`、`⊗`、`τ_b`。
+```cpp
+// scan.hpp
+template<class Grammar> scan_result scan(std::string_view, scan_options);   // 流式（H2D 与 scan 重叠）
+template<class Grammar> gpu::device_result scan_device(const uint8_t*, n);  // device-resident
+result.visit(bytes, visitor);                                               // 消费者
+```
+
+内部映射：
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| IR 适配 | `core/cuda.hpp::to_scan_plan<P>()` | `cell` → `scan_plan`（后端输入） |
+| GPU 熔合扫描 | `pipeline.cuh` | `classify` → `desc_wordt64` → `thrust::inclusive_scan(TCompose64)` → `desc_replay64` → `scatter` |
+| 树归约 | `core/cuda.hpp::tree_reduce_gpu` | 分块局部归约 + `thrust::reduce` |
+| 流式重叠 | `scan.hpp::stream_ctx` | 双缓冲、两 stream、`scan_chunk` carry |
+
+**同一套 `cell`/`prefix_reduce`，只换放置与消费者。**
 
 ---
 
-# Slide B7 — 边界（为什么有些文法不能快）
-
-需要**无界回溯**的规则：某备选先匹配很长一段才失败，必须退回换另一条。此时
+# Slide E2 — 收束
 
 ```
-σ(i,j) = "段 [i,j) 是否派生 R"     —— 依赖 j 之后的内容
+理论：解析 = 同态；并行 ⟺ 摘要可压缩；四 schema = 四个后缀幺半群
+                    ↓  (template match → IR rewrite)
+源码：dsl AST ─reify/der/build_dfa→ dfa
+              ─bracket_guard→ open/close
+              ─monoid_op→ op
+              ───────────────→ cell{schema,…} ──→ plan
+                                         ↓
+            逐字节元素 τ_b + prefix_reduce ──→ 结构索引 / 深度配对 / 归约值
 ```
 
-没有**有界**的 `M` 能装下这种摘要 ⇒ 不可压缩 ⇒ `interval`（区间 DP / Valiant，`O(n²)`）。
-它仍然**正确**，但**达不到 SOTA**；而 cuJSON/simdjson 根本不处理这类文法。
-
-**一句话收束**：
-
-```
-解析 = Σ* 到摘要幺半群 (S,⊗,e) 的同态        （A1–A3）
-并行 ⟺ 摘要可压缩                             （A4）
-四种压缩方式 = finite / stack / tree / choice （A5，同一 prefix_reduce）
-不可压缩     = interval（O(n²) 兜底）          （B7）
-```
+**一个原语（`prefix_reduce`）、一个 IR（`cell`）、四个 rewrite（finite/stack/tree/choice）。**
