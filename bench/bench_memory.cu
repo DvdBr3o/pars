@@ -45,6 +45,8 @@
 
 namespace bp = bench_payloads;
 
+using namespace pars;
+
 namespace {
 
 [[nodiscard]] std::size_t free_mib() {
