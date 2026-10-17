@@ -27,8 +27,12 @@
    - `placement=host`：公开 `scan()` 的流式边界（分块 H2D 重叠 + 索引 D2H）。
 
 `bench/bench_mem_sota.cpp <lang> <scale_mb>` — host 基线（simdjson / toml++ /
-pugixml / inih），构建一次 DOM 后按 `/proc/self/statm` 采样**存活 DOM 的 RSS
+pugixml / inih / flex），构建一次 DOM 后按 `/proc/self/statm` 采样**存活 DOM 的 RSS
 增长**；结果经 `volatile` sink 消费以防被优化掉。
+
+`bench/bench_mem_simdcsv.cpp <scale_mb>` — CSV 基线。simdcsv 的程序按最坏情况
+预分配 `uint32_t[p.size()]`（4× 输入），那不是工作集；本探针链接它真正的
+`find_indexes`，报告**索引实际保留的大小** `n_indexes × 4`。
 
 cuJSON 没有内置显存输出，由 `bench/measure_child_gpu.py` 采样 `nvidia-smi`
 峰值，`paper_data` 取 5 次中位数，并采样 `CUDA_VISIBLE_DEVICES` 实际用的那张卡。

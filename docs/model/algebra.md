@@ -183,7 +183,7 @@ toml++（TOML）、pugixml（XML）、inih（INI）。**数据**：JSON 用**真
 | JSON 结构索引（finite+stack，device） | 39.8 GB/s |
 | JSON + 括号配对 | 19.5 GB/s |
 | tree schema 归约（device, R7） | **48.2 GB/s** |
-| 内存占用（÷输入，128 MB，A100） | pars·device 2.2–6.0× / pars·host 0.2–0.8×；simdjson 5.9× / **cuJSON 7.8×** / toml++ 15.3× / inih 6.6× / pugixml 5.4× / simdcsv 见 CSV（图 `fig_memory`） |
+| 内存占用（÷输入，128 MB，A100） | pars·device 2.2–6.0× / pars·host 0.2–0.8×；simdjson 5.9× / **cuJSON 7.8×** / toml++ 15.3× / inih 6.6× / pugixml 5.4× / **simdcsv 0.9×** / **flex 0.4×**（图 `fig_memory`） |
 
 内存口径（`docs/model/bench_memory.md`）：每个 `(language, placement)` 单独一个进程，测 warmup 后的稳态工作集；`device` = 输入常驻、索引留显存（与 cuJSON 同 interval），`host` = 公开 `scan()` 的流式边界（含 D2H）。旧数字（JSON 1.03×）是把 16 分块扫描的 per-chunk 缓存当成了整段工作集、且数据在 CSV 里手填，已废弃。
 
