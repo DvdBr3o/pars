@@ -211,12 +211,22 @@ target("pars.bench.memory")
 target("pars.bench.mem_sota")
     set_kind("binary")
     add_files("bench/bench_mem_sota.cpp")
+    if not is_plat("windows") then
+        add_files("bench/clike_lex.yy.cpp")
+    end
     add_packages("simdjson", "toml++", "pugixml", "inih")
     add_includedirs("bench")
     set_languages("cxxlatest")
     add_cxxflags("-march=native")
 -- CSV SOTA baseline (simdcsv): Linux-only (POSIX unistd.h / mmap).
 if not is_plat("windows") then
+    target("pars.bench.mem_simdcsv")
+        set_kind("binary")
+        add_files("bench/bench_mem_simdcsv.cpp")
+        add_includedirs("third_party/simdcsv")
+        add_cxxflags("-march=native", "-include cstdint", {force = true})
+        set_languages("cxxlatest")
+
     target("pars.baseline.simdcsv")
         set_kind("binary")
         add_files("third_party/simdcsv/main.cpp")
@@ -289,6 +299,7 @@ target("pars.paper.data")
         table.insert(paper_deps, "pars.baseline.simdcsv")
         table.insert(paper_deps, "pars.baseline.clike")
         table.insert(paper_deps, "pars.baseline.cujson")
+        table.insert(paper_deps, "pars.bench.mem_simdcsv")
     end
     add_deps(paper_deps)
     on_build(function (target)
@@ -322,8 +333,7 @@ target("pars.paper.data")
         local pH = bin("pars.bench.parse.host")
         local pV = bin("pars.bench.variants")
         local pM = bin("pars.bench.memory")
-        local pMS = bin("pars.bench.mem_sota")
-        local sd = (not is_plat("windows")) and bin("pars.baseline.simdcsv") or nil
+        local pMS = bin("pars.bench.mem_sota")        local sd = (not is_plat("windows")) and bin("pars.baseline.simdcsv") or nil
 
         -- python3 on POSIX, python on Windows.
         local pyp = "python3"
@@ -473,8 +483,16 @@ target("pars.paper.data")
                 mem[#mem + 1] = l
             end
         end
-        for _, lang in ipairs({"json", "toml", "xml", "ini"}) do
+        for _, lang in ipairs({"json", "toml", "xml", "ini", "clike"}) do
             for _, l in ipairs(rows_of(os.iorunv(pMS, {lang, tostring(mem_scale)}))) do
+                mem[#mem + 1] = l
+            end
+        end
+        -- CSV: simdcsv keeps only its separator index; simdcsv's own program
+        -- pre-allocates 4x the input, so we measure the retained index size.
+        if not is_plat("windows") then
+            local pSC = bin("pars.bench.mem_simdcsv")
+            for _, l in ipairs(rows_of(os.iorunv(pSC, {tostring(mem_scale)}))) do
                 mem[#mem + 1] = l
             end
         end

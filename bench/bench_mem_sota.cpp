@@ -32,11 +32,24 @@
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <sys/resource.h>
 #include <unistd.h>
 
 namespace bp = bench_payloads;
+
+// flex-generated C-like lexer (same one as pars.baseline.clike), declared here
+// so this probe can measure the index it builds.  Linux-only (the generated
+// lexer uses unistd.h), like the other flex/simdcsv targets.
+#ifndef _WIN32
+extern std::vector<std::uint32_t> g_pos;
+extern const char*				  g_base;
+struct yy_buffer_state;
+extern int				yylex(void);
+extern yy_buffer_state* yy_scan_bytes(const char*, int);
+extern void				yy_delete_buffer(yy_buffer_state*);
+#endif
 
 static volatile std::size_t g_sink = 0;
 
@@ -126,6 +139,18 @@ int main(int argc, char** argv) {
 			}, &m);
 			g_sink = g_sink + m.size();
 		});
+	} else if (lang == "clike") {
+#ifndef _WIN32
+		std::string doc = bp::gen_clike(tgt);
+		g_base			= doc.data();
+		measure("clike", "flex", doc.size(), mb, [&] {
+			g_pos.clear();
+			auto* b = yy_scan_bytes(doc.data(), (int)doc.size());
+			yylex();
+			yy_delete_buffer(b);
+			g_sink = g_sink + g_pos.size();
+		});
+#endif
 	}
 	return 0;
 }
