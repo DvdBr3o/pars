@@ -95,6 +95,7 @@ target("pars.bench.parse")
     add_packages("simdjson")
     add_includedirs("bench")
     set_languages("cxxlatest")
+    add_cxxflags("-march=native")  -- match the simdjson baseline's codegen
 
 -- pars-side full parse for TOML/XML/INI (GPU R1-R6 + host post-R6 M+D).
 target("pars.bench.parse.host")
@@ -105,6 +106,7 @@ target("pars.bench.parse.host")
     add_files("bench/bench_parse_host.cu")
     add_includedirs("bench")
     set_languages("cxxlatest")
+    add_cxxflags("-march=native")  -- match the host baselines' codegen
 
 -- Single-point query latency: pars (index navigation) vs SOTA (DOM lookup).
 target("pars.bench.pointquery")
@@ -117,6 +119,7 @@ target("pars.bench.pointquery")
     add_packages("simdjson", "toml++", "pugixml", "inih")
     add_includedirs("bench")
     set_languages("cxxlatest")
+    add_cxxflags("-march=native")  -- match the host baselines' codegen
 
 -- cuJSON (GPU JSON) reference baseline, reproduced and patched for CUDA 13/CCCL.
 -- Linux-only (uses x86intrin.h).
@@ -172,6 +175,7 @@ target("pars.bench.variants")
     add_packages("simdjson", "toml++", "pugixml", "inih")
     add_includedirs("bench")
     set_languages("cxxlatest")
+    add_cxxflags("-march=native")  -- match the host baselines' codegen
 
 -- Tree schema (R7) on the GPU: associative reduction of integer leaves.
 target("pars.bench.tree")

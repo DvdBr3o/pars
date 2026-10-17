@@ -78,6 +78,9 @@ int main(int argc, char** argv) {
 		return static_cast<double>(n) / (s / iters) / 1e9;
 	};
 
+	// `reduce_device<P>` lowers the plan's tree cell to `tree_reduce_gpu` with the
+	// default chunk, so these two rows exercise the same kernel; they are kept
+	// to show that the plan path adds no overhead, not as independent impls.
 	const double g_plan = bench([&] { return core::reduce_device<kExpr>(dp, n); });
 	const double g_raw	= bench([&] { return core::tree_reduce_gpu<core::add_i64>(dp, n, 1024); });
 	cudaDeviceSynchronize();

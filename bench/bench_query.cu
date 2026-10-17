@@ -22,6 +22,9 @@
 #include <string>
 #include <vector>
 
+// Keep query results observable so the loop is not optimised out.
+static volatile long g_sink = 0;
+
 using namespace std::chrono;
 using namespace pars;
 
@@ -214,7 +217,7 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < iters; ++i) {
 		auto	   a = steady_clock::now();
 		json_query qq(cur);
-		(void)qq.count_pushevents();
+		g_sink = g_sink + static_cast<long>(qq.count_pushevents());
 		auto b = steady_clock::now();
 		qsec.push_back(duration<double>(b - a).count());
 	}
