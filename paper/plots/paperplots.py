@@ -447,19 +447,21 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 def figure_memory(mem):
     """Memory footprint vs input, per language.
 
-    pars is shown twice (device-resident and host boundary); each baseline is
-    shown once, on the placement it actually runs (host for the CPU parsers,
-    device for cuJSON).  Bars are laid out per language so a language's bars
-    are adjacent."""
+    pars is shown only on its device-resident placement (the same interval as
+    cuJSON) so the bars are like-for-like; each baseline is shown on the
+    placement it actually runs (host for the CPU parsers, device for cuJSON).
+    Bars are laid out per language so a language's bars are adjacent."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
+
+    # pars measures two placements; the figure keeps only the device one.
+    mem = mem[~((mem.impl == "pars") & (mem.placement != "device"))]
 
     fmts = [f for f in FMT_ORDER if f in set(mem["format"])]
     fig, ax = plt.subplots(figsize=FIGSIZE_WIDE, layout="constrained")
     for xi, f in enumerate(fmts):
         sub = mem[mem.format == f]
-        # one bar per (impl, placement); pars device first, then pars host,
-        # then the baseline.
+        # one bar per (impl, placement)
         series = []
         for sv in dict.fromkeys(sub["impl"]):
             psub = sub[sub.impl == sv]
@@ -475,7 +477,7 @@ def figure_memory(mem):
                 continue
             v = float(rows.iloc[0])
             if sv == "pars":
-                col = PARS_COLOR["N1a"] if pl == "device" else PARS_COLOR["N3c"]
+                col = PARS_COLOR["N1a"]
             else:
                 col = _sota_color(sv)
             ax.bar(xi + (j - (nf - 1) / 2) * wf, v, wf, color=col, edgecolor="black",
@@ -487,10 +489,7 @@ def figure_memory(mem):
     ax.set_xticklabels([LABELS.get(f, f) for f in fmts])
     ax.set_ylabel("working set / input (x, log)")
 
-    handles = [
-        Patch(color=PARS_COLOR["N1a"], label="pars (device)"),
-        Patch(color=PARS_COLOR["N3c"], label="pars (host boundary)"),
-    ]
+    handles = [Patch(color=PARS_COLOR["N1a"], label="pars (device)")]
     for f in fmts:
         for impl in dict.fromkeys(mem[(mem.format == f) & (mem.impl != "pars")]["impl"]):
             handles.append(
