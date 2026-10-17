@@ -228,6 +228,49 @@ compose(a, b):
 
 ---
 
+### 5.5 每种 schema 的一个端到端 workload
+
+**`finite` — JSON 字符串 `"x\"y"`（含转义）**
+
+```
+byte:        "     x     \     "     y     "
+τ_b:        flip  keep  esc  consumed keep flip
+state before: 0    1     1     1      1     1      (0=外,1=内,2=转义)
+```
+读前缀摘要 ⇒ `in = 0 1 1 1 1 1`：被转义的 `\"` 也算"在串内"，字符串内容全部被掩掉。
+
+**`stack` — JSON 嵌套括号 `{"a":[1,2]}`**（括号 token：`{`@0,`[`@5,`]`@9,`}`@10）
+
+```
+token:   {    [    ]    }        key(open:深度-1, close:深度)
+增量:   +1   +1   -1   -1
+深度:    1    2    1    0        key: 0 1 1 0
+按 key 稳定排序 + 相邻配对 ⇒ {0↔10}, {5↔9}
+```
+
+**`tree` — 算术归约 `1+2+3+4`**
+
+```
+叶子:     1     2     3     4
+τ_b:    (T,1) (e) (T,2) (e) (T,3) (e) (T,4)      （'+' = e）
+前缀积:    1     3     6    10                   整段归约值 = 10
+```
+
+**`choice` — PEG `value ::= "true" / "false" / "null" / number`，输入 `true`**
+
+```
+备选      rank   在 "true" 上
+"true"      0    成功   ← 最小 rank 的幸存者
+"false"     1    首字节 'f'≠'t'，失败
+"null"      2    首字节 'n'≠'t'，失败
+number      3    首字节非数字，失败        ⇒ 摘要 = (matched, rank=0, "true")
+```
+
+四者对照（同一模板）：`finite` 读出"在不在串内"，`stack` 读出深度→配对，
+`tree` 读出归约值，`choice` 读出最小幸存 rank。**全部由同一个 `prefix_reduce` 计算。**
+
+---
+
 ## 6. 四种 schema 的统一视图
 
 | schema | `S`（元素） | 元素大小 | 可压缩的原因 |
