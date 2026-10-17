@@ -84,6 +84,17 @@ struct ini_parse {
 	bool											 in_comment = false;
 	std::uint64_t									 hash		= 1469598103934665603ull;
 
+	void reset() {
+		sections.clear();
+		keys.clear();
+		vals.clear();
+		arena.clear();
+		cur_sec	   = 0;
+		expect	   = 0;
+		in_comment = false;
+		hash	   = 1469598103934665603ull;
+	}
+
 	void											 add(std::string_view s, bool value) {
 		const std::size_t off = arena.size();
 		arena.append(s);
@@ -137,6 +148,15 @@ struct xml_parse {
 	bool						  prolog = false, expect_name = false;
 	std::string_view			  tag {};
 	std::uint64_t				  hash = 1469598103934665603ull;
+
+	void reset() {
+		stack.clear();
+		elements = attrs = text_bytes = max_depth = 0;
+		in_tag = closing = expect_attrval = false;
+		prolog = expect_name = false;
+		tag		 = {};
+		hash	 = 1469598103934665603ull;
+	}
 
 	void						  scalar(std::size_t b, std::size_t e) {
 		if (prolog)
@@ -216,6 +236,16 @@ struct toml_parse {
 	bool		  in_comment = false;
 	std::uint64_t hash		 = 1469598103934665603ull;
 
+	void reset() {
+		sections.clear();
+		entries.clear();
+		key		   = {};
+		elems	   = 0;
+		mode	   = 0;
+		in_comment = false;
+		hash	   = 1469598103934665603ull;
+	}
+
 	void		  scalar(std::size_t b, std::size_t e) {
 		if (in_comment)
 			return;
@@ -262,6 +292,8 @@ template<class F>
 std::vector<double> sample(std::size_t bytes, int iters, F&& f) {
 	std::vector<double> g;
 	g.reserve(iters);
+	f();  // warm up: persistent device buffers + visitor vectors
+	f();
 	for (int i = 0; i < iters; ++i) {
 		auto a = steady_clock::now();
 		f();
@@ -352,6 +384,8 @@ int main(int argc, char** argv) {
 			recs_t * 3,
 			p0.sections.size()
 		);
+		toml_parse p {};
+		p.base = base;
 		emit(
 			"toml",
 			mb,
@@ -359,9 +393,14 @@ int main(int argc, char** argv) {
 				toml.size(),
 				iters,
 				[&] {
-					toml_parse p {};
-					p.base = base;
-					model::replay(base, toml.size(), sv, p);
+					// full pipeline: GPU scan + H2D + D2H + host replay (matches
+					// the P3 interval in bench_parse.cu).
+					auto hr = run_parse<bench::toml_grammar>(toml, false);
+					model::structural_view sv2 {
+						hr.structural.data(), nullptr, hr.structural.size()
+					};
+					p.reset();
+					model::replay(base, toml.size(), sv2, p);
 				}
 			),
 			sv.n,
@@ -382,6 +421,8 @@ int main(int argc, char** argv) {
 			recs_i * 3,
 			p0.sections.size()
 		);
+		ini_parse p {};
+		p.base = base;
 		emit(
 			"ini",
 			mb,
@@ -389,9 +430,12 @@ int main(int argc, char** argv) {
 				ini.size(),
 				iters,
 				[&] {
-					ini_parse p {};
-					p.base = base;
-					model::replay(base, ini.size(), sv, p);
+					auto hr = run_parse<bench::ini_grammar>(ini, false);
+					model::structural_view sv2 {
+						hr.structural.data(), nullptr, hr.structural.size()
+					};
+					p.reset();
+					model::replay(base, ini.size(), sv2, p);
 				}
 			),
 			sv.n,
@@ -412,6 +456,8 @@ int main(int argc, char** argv) {
 			recs_x,
 			p0.attrs
 		);
+		xml_parse p {};
+		p.base = base;
 		emit(
 			"xml",
 			mb,
@@ -419,9 +465,12 @@ int main(int argc, char** argv) {
 				xml.size(),
 				iters,
 				[&] {
-					xml_parse p {};
-					p.base = base;
-					model::replay(base, xml.size(), sv, p);
+					auto hr = run_parse<bench::xml_grammar>(xml, false);
+					model::structural_view sv2 {
+						hr.structural.data(), nullptr, hr.structural.size()
+					};
+					p.reset();
+					model::replay(base, xml.size(), sv2, p);
 				}
 			),
 			sv.n,

@@ -167,7 +167,7 @@ def load_variants(data_dir: Path = DATADIR) -> pd.DataFrame:
 
 
 # Device working set: how much memory the scanner holds vs the input.
-MEMORY_COLS = ["format", "impl", "scale_mb", "input_mib", "used_mib", "ratio"]
+MEMORY_COLS = ["format", "impl", "placement", "scale_mb", "input_mib", "used_mib", "ratio"]
 
 
 def load_memory(data_dir: Path = DATADIR) -> pd.DataFrame:
@@ -445,9 +445,12 @@ def figure_parse(pars_tiers, parse_data, base, scale=None):
 
 
 def figure_memory(mem):
-    """Memory footprint vs input, per language: pars (device) vs SOTA (host).
+    """Memory footprint vs input, per language.
 
-    Bars are laid out per language so a language's bars are adjacent."""
+    pars is shown twice (device-resident and host boundary); each baseline is
+    shown once, on the placement it actually runs (host for the CPU parsers,
+    device for cuJSON).  Bars are laid out per language so a language's bars
+    are adjacent."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
@@ -455,15 +458,26 @@ def figure_memory(mem):
     fig, ax = plt.subplots(figsize=FIGSIZE_WIDE, layout="constrained")
     for xi, f in enumerate(fmts):
         sub = mem[mem.format == f]
-        impls = ["pars"] + [i for i in dict.fromkeys(sub["impl"]) if i != "pars"]
-        nf = len(impls)
-        wf = 0.8 / max(nf, 1)
-        for j, sv in enumerate(impls):
-            r = sub[sub.impl == sv]["ratio"]
-            if not len(r):
+        # one bar per (impl, placement); pars device first, then pars host,
+        # then the baseline.
+        series = []
+        for sv in dict.fromkeys(sub["impl"]):
+            psub = sub[sub.impl == sv]
+            for pl in dict.fromkeys(psub["placement"]):
+                series.append((sv, pl))
+        # order pars first
+        series.sort(key=lambda t: (t[0] != "pars", t[0], t[1]))
+        nf = max(len(series), 1)
+        wf = 0.8 / nf
+        for j, (sv, pl) in enumerate(series):
+            rows = sub[(sub.impl == sv) & (sub.placement == pl)]["ratio"]
+            if not len(rows):
                 continue
-            v = float(r.iloc[0])
-            col = PARS_COLOR["N1a"] if sv == "pars" else _sota_color(sv)
+            v = float(rows.iloc[0])
+            if sv == "pars":
+                col = PARS_COLOR["N1a"] if pl == "device" else PARS_COLOR["N3c"]
+            else:
+                col = _sota_color(sv)
             ax.bar(xi + (j - (nf - 1) / 2) * wf, v, wf, color=col, edgecolor="black",
                    linewidth=0.4)
     ax.axhline(1.0, color="#999999", linestyle="--", linewidth=0.8)
@@ -471,13 +485,16 @@ def figure_memory(mem):
     ax.set_yscale("log")
     ax.set_xticks(np.arange(len(fmts)))
     ax.set_xticklabels([LABELS.get(f, f) for f in fmts])
-    ax.set_ylabel("parse footprint / input (x, log)")
+    ax.set_ylabel("working set / input (x, log)")
 
-    handles = [Patch(color=PARS_COLOR["N1a"], label="pars (device)")]
+    handles = [
+        Patch(color=PARS_COLOR["N1a"], label="pars (device)"),
+        Patch(color=PARS_COLOR["N3c"], label="pars (host boundary)"),
+    ]
     for f in fmts:
         for impl in dict.fromkeys(mem[(mem.format == f) & (mem.impl != "pars")]["impl"]):
             handles.append(
-                Patch(color=_sota_color(str(impl)), label=f"{impl} (host · {LABELS.get(f, f)})")
+                Patch(color=_sota_color(str(impl)), label=f"{impl} ({LABELS.get(f, f)})")
             )
     seen: dict[str, object] = {}
     for h in handles:

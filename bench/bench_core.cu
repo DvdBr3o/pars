@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
 
 	std::uint8_t* dp = nullptr;
 	cudaMalloc(&dp, padded);
+	cudaMemset(dp, 0, padded);	// scanner reads ceil(n/32)*32 bytes
 	cudaMemcpy(dp, json.data(), n, cudaMemcpyHostToDevice);
 
 	core::scanner<kCore> sc;

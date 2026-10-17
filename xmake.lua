@@ -279,6 +279,7 @@ target("pars.paper.data")
         "pars.bench.boundary", "pars.bench.baselines",
         "pars.bench.parse", "pars.bench.query", "pars.bench.parse.host",
         "pars.bench.pointquery", "pars.bench.variants",
+        "pars.bench.memory", "pars.bench.mem_sota",
     }
     if not is_plat("windows") then
         table.insert(paper_deps, "pars.baseline.simdcsv")
@@ -316,6 +317,8 @@ target("pars.paper.data")
         local pPQ = bin("pars.bench.pointquery")
         local pH = bin("pars.bench.parse.host")
         local pV = bin("pars.bench.variants")
+        local pM = bin("pars.bench.memory")
+        local pMS = bin("pars.bench.mem_sota")
         local sd = (not is_plat("windows")) and bin("pars.baseline.simdcsv") or nil
 
         -- python3 on POSIX, python on Windows.
@@ -453,11 +456,54 @@ target("pars.paper.data")
             end
         end
 
+        -- Working-set figures.  pars: one process per (lang, placement) so the
+        -- persistent per-grammar device cache cannot leak into the next
+        -- measurement.  Host baselines: one process per (impl) for a clean RSS
+        -- baseline.  Only the largest configured scale is measured (the ratio
+        -- is what the figure reports; footprint is scale-invariant).
+        local mem = {}
+        local mem_scale = scales[#scales]
+        local mem_langs = {"json", "csv", "toml", "ini", "xml", "clike"}
+        for _, lang in ipairs(mem_langs) do
+            for _, l in ipairs(rows_of(os.iorunv(pM, {lang, tostring(mem_scale)}))) do
+                mem[#mem + 1] = l
+            end
+        end
+        for _, lang in ipairs({"json", "toml", "xml", "ini"}) do
+            for _, l in ipairs(rows_of(os.iorunv(pMS, {lang, tostring(mem_scale)}))) do
+                mem[#mem + 1] = l
+            end
+        end
+        -- cuJSON: peak device memory of its own Fig.9 harness, sampled from a
+        -- child process (it has no built-in VRAM report).
+        if (not is_plat("windows")) then
+            local cj = bin("pars.baseline.cujson")
+            local jdir = path.join(root, "build", "paper_json")
+            os.mkdir(jdir)
+            local jf = path.join(jdir, "json_" .. mem_scale .. ".json")
+            if not os.isfile(jf) then
+                os.execv(pyp, {path.join(root, "bench", "gen_json.py"), tostring(mem_scale), jf})
+            end
+            local ok, out = pcall(function ()
+                return os.iorunv(pyp, {path.join(root, "bench", "measure_child_gpu.py"),
+                                       "0", cj, "-b", jf})
+            end)
+            local used = ok and tonumber(out:match("(%d+)")) or nil
+            if used then
+                local input_mib = mem_scale
+                mem[#mem + 1] = string.format("json,cujson,device,%d,%.1f,%.1f,%.2f",
+                    mem_scale, input_mib, used, used / input_mib)
+            end
+        end
+
+        io.writefile(path.join(outdir, "memory.csv"),
+            "# format,impl,placement,scale_mb,input_mib,used_mib,ratio\n" ..
+            table.concat(mem, "\n") .. "\n")
         io.writefile(path.join(outdir, "pars.csv"), header .. "\n" .. table.concat(pr, "\n") .. "\n")
         io.writefile(path.join(outdir, "baselines.csv"), header .. "\n" .. table.concat(br, "\n") .. "\n")
         io.writefile(path.join(outdir, "stages.csv"),
             "# format,scale_mb,r1_ms,r2r4_ms,r3r5_ms,r6_ms\n" .. table.concat(sr, "\n") .. "\n")
         io.writefile(path.join(outdir, "parse.csv"), header .. "\n" .. table.concat(par, "\n") .. "\n")
         io.writefile(path.join(outdir, "variants.csv"), header .. "\n" .. table.concat(vr, "\n") .. "\n")
-        print("wrote paper/plots/data/{pars,baselines,stages,parse,variants}.csv")
+        print("wrote paper/plots/data/{pars,baselines,stages,parse,variants,memory}.csv")
     end)

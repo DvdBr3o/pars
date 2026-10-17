@@ -17,9 +17,13 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace std::chrono;
+
+// Consume every baseline result so the optimiser cannot delete the parse.
+static volatile std::size_t g_sink = 0;
 
 static double gbps(std::size_t bytes, double s) {
 	return (double)bytes / s / 1e9;
@@ -65,10 +69,6 @@ static std::string rep(const std::string& rec, std::size_t target) {
 	out.reserve(target);
 	while (out.size() < target) out += rec;
 	return out;
-}
-
-static int ini_cb(void*, const char*, const char*, const char*) {
-	return 1;
 }
 
 int main(int argc, char** argv) {
@@ -129,23 +129,42 @@ int main(int argc, char** argv) {
 		// Match cuJSON's own simdjson baseline (ondemand quickstart `iterate`),
 		// but on a properly padded buffer: ondemand reads SIMDJSON_PADDING bytes
 		// past the end, so passing a bare std::string is undefined behaviour.
+		// The result of every element is consumed (type + value) so the walk is
+		// not optimised away and both sides do comparable work.
 		simdjson::padded_string ps(json.data(), json.size());
 		simdjson::ondemand::parser p;
 		emit("json", "simdjson", mb, sample(json.size(), iters, [&] {
+				 std::size_t sink = 0;
 				 auto d = p.iterate(ps);
-				 for (auto v : d) (void)v;
+				 for (auto v : d) {
+					 simdjson::ondemand::json_type t;
+					 if (!v.type().get(t)) sink += static_cast<std::size_t>(t);
+					 int64_t iv = 0;
+					 if (!v.get_int64().get(iv)) sink += static_cast<std::size_t>(iv);
+				 }
+				 g_sink = g_sink + sink;
 			 }));
 	}
 	emit("toml", "toml++", mb, sample(toml.size(), iters, [&] {
 			 auto r = toml::parse(toml);
-			 (void)r;
+			 g_sink = g_sink + r.size();
 		 }));
 	emit("xml", "pugixml", mb, sample(xml.size(), iters, [&] {
 			 pugi::xml_document doc;
-			 doc.load_buffer(xml.data(), xml.size());
+			 pugi::xml_parse_result  r = doc.load_buffer(xml.data(), xml.size());
+			 g_sink = g_sink + static_cast<std::size_t>(r.status) + doc.child("root").child("item").attribute("id").as_uint();
 		 }));
+	// inih builds the key->value map a real consumer needs (not a no-op callback).
+	std::unordered_map<std::string, std::string> ini_map;
+	auto ini_cb = [](void* u, const char* s, const char* n, const char* v) {
+		auto* mm = static_cast<std::unordered_map<std::string, std::string>*>(u);
+		(*mm)[std::string(s) + "." + n] = v;
+		return 1;
+	};
 	emit("ini", "inih", mb, sample(ini.size(), iters, [&] {
-			 ini_parse_string(ini.c_str(), ini_cb, nullptr);
+			 ini_map.clear();
+			 ini_parse_string(ini.c_str(), ini_cb, &ini_map);
+			 g_sink = g_sink + ini_map.size();
 		 }));
 	return 0;
 }

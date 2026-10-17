@@ -268,6 +268,14 @@ static void bench_format(
 		0
 	);
 	// N2 = H2D + R1-R6, no D2H: the interval cuJSON's published total covers.
+	// The host->device copy is pinned + async so this measures the boundary
+	// cost rather than a pageable-memcpy penalty (N3c already overlaps; N2 is
+	// the single-shot, non-overlapped reference).
+	std::uint8_t* hpin = nullptr;
+	cudaHostAlloc(&hpin, padded, cudaHostAllocDefault);
+	std::memcpy(hpin, payload.data(), n);
+	if (padded > n)
+		std::memset(hpin + n, 0, padded - n);
 	emit(
 		fmt,
 		"pars",
@@ -277,7 +285,7 @@ static void bench_format(
 			n,
 			iters,
 			[&] {
-				cudaMemcpy(dp, payload.data(), n, cudaMemcpyHostToDevice);
+				cudaMemcpyAsync(dp, hpin, padded, cudaMemcpyHostToDevice, 0);
 				(void)g.scan_device(dp, n, 0, false, true);
 				cudaStreamSynchronize(0);
 			}
@@ -285,6 +293,7 @@ static void bench_format(
 		tokens,
 		n
 	);
+	cudaFreeHost(hpin);
 	cudaFree(dp);
 
 	emit(

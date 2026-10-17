@@ -379,6 +379,8 @@ template<class F>
 std::vector<double> sample(std::size_t bytes, int iters, F&& f) {
 	std::vector<double> g;
 	g.reserve(iters);
+	f();  // warm up: persistent buffers + first-touch allocations
+	f();
 	for (int i = 0; i < iters; ++i) {
 		auto a = steady_clock::now();
 		f();
