@@ -4,11 +4,15 @@
 Runs the child and samples `nvidia-smi memory.used` on the given device,
 reporting the max minus the pre-run baseline.
 
+`nvidia-smi` is polled as fast as the driver answers (typically a few ms) for
+the whole lifetime of the child.  Because a very short allocation spike can
+fall between two samples, callers that want a robust number should run this
+several times and take the median (see xmake's paper_data step).
+
 usage: measure_child_gpu.py <device_index> <cmd> [args...]
 """
 import subprocess
 import sys
-import time
 
 
 def used(dev: str) -> int:
@@ -30,7 +34,6 @@ def main() -> int:
     peak = base
     while p.poll() is None:
         peak = max(peak, used(dev))
-        time.sleep(0.002)
     p.wait()
     peak = max(peak, used(dev))
     print(peak - base)

@@ -475,9 +475,13 @@ target("pars.paper.data")
             end
         end
         -- cuJSON: peak device memory of its own Fig.9 harness, sampled from a
-        -- child process (it has no built-in VRAM report).
+        -- child process (it has no built-in VRAM report).  Sample the same
+        -- physical GPU the child runs on: under CUDA_VISIBLE_DEVICES=n the
+        -- first visible device is the one cuJSON uses.
         if (not is_plat("windows")) then
             local cj = bin("pars.baseline.cujson")
+            local cvd = os.getenv("CUDA_VISIBLE_DEVICES") or ""
+            local dev = cvd:match("^(%d+)") or "0"
             local jdir = path.join(root, "build", "paper_json")
             os.mkdir(jdir)
             local jf = path.join(jdir, "json_" .. mem_scale .. ".json")
@@ -485,16 +489,24 @@ target("pars.paper.data")
                 os.execv(pyp, {path.join(root, "bench", "gen_json.py"), tostring(mem_scale), jf})
             end
             local used = nil
-            local ok_out = nil
-            try {
-                function ()
-                    ok_out = os.iorunv(pyp, {path.join(root, "bench", "measure_child_gpu.py"),
-                                             "0", cj, "-b", jf})
-                end,
-                catch { function (e) end }
-            }
-            if ok_out then
-                used = tonumber(ok_out:match("(%d+)"))
+            local samples = {}
+            for _ = 1, 5 do
+                local ok_out = nil
+                try {
+                    function ()
+                        ok_out = os.iorunv(pyp, {path.join(root, "bench", "measure_child_gpu.py"),
+                                                 dev, cj, "-b", jf})
+                    end,
+                    catch { function (e) end }
+                }
+                if ok_out then
+                    local v = tonumber(ok_out:match("(%d+)"))
+                    if v then samples[#samples + 1] = v end
+                end
+            end
+            if #samples > 0 then
+                table.sort(samples)
+                used = samples[math.floor((#samples + 1) / 2)]
             end
             if used then
                 local input_mib = mem_scale
