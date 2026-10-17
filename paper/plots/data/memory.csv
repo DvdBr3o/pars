@@ -11,8 +11,10 @@ xml,pars,device,128,128.0,352.0,2.75
 xml,pars,host,128,128.0,68.0,0.53
 clike,pars,device,128,128.0,276.0,2.16
 clike,pars,host,128,128.0,30.0,0.23
-json,simdjson,host,128,128.0,758.0,5.92
+json,simdjson,host,128,128.0,755.3,5.90
 toml,toml++,host,128,128.0,1959.1,15.31
-xml,pugixml,host,128,128.0,685.8,5.36
-ini,inih,host,128,128.0,838.4,6.55
+xml,pugixml,host,128,128.0,685.7,5.36
+ini,inih,host,128,128.0,838.5,6.55
+clike,flex,host,128,128.0,55.5,0.43
+csv,simdcsv,host,128,128.0,112.7,0.88
 json,cujson,device,128,128.0,997.0,7.79
